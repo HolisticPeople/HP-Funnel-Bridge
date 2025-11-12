@@ -87,22 +87,36 @@ class TotalsController {
         $pointsDiscount = min($ps->pointsToMoney($points_to_redeem), $products_net);
         if ($pointsDiscount > 0) {
           $order->add_fee('Points redemption (preview)', -1 * $pointsDiscount);
-          // Recalculate after applying the discount fee
-          $order->calculate_totals(false);
         }
       } else {
-        // Ensure totals present at least once
-        $order->calculate_totals(false);
+        $pointsDiscount = 0.0;
       }
+
+      // Recalculate after applying fee to update order internals
+      $order->calculate_totals(false);
+
+      // Build grand manually from components (avoid WC rounding quirks in get_total)
+      $items_total_after_discounts = 0.0;
+      foreach ($order->get_items() as $it) {
+        if ($it instanceof \WC_Order_Item_Product) {
+          $items_total_after_discounts += (float) $it->get_total();
+        }
+      }
+      $fees_total = 0.0;
+      foreach ($order->get_fees() as $fee) {
+        $fees_total += (float) $fee->get_total();
+      }
+      $shipping_total = (float) $order->get_shipping_total();
+      $grand_manual = max(0.0, $items_total_after_discounts + $fees_total + $shipping_total);
 
 			return new WP_REST_Response([
 				'subtotal' => (float)$order->get_subtotal(),
-				'discount_total' => (float)$order->get_discount_total(),
-				'shipping_total' => (float)$order->get_shipping_total(),
+        'discount_total' => (float)$order->get_discount_total(),
+        'shipping_total' => (float)$order->get_shipping_total(),
 				'tax_total' => (float)$order->get_total_tax(),
 				'fees_total' => (float)$order->get_fees() ? array_sum(array_map(function($f){ return (float)$f->get_total(); }, $order->get_fees())) : 0.0,
         'points_discount' => (float)$pointsDiscount,
-				'grand_total' => (float)$order->get_total(),
+        'grand_total' => (float)$grand_manual,
 			]);
 		} finally {
 			if ($order_id > 0) {

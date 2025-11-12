@@ -104,7 +104,19 @@ class CheckoutController {
       }
       // Final totals after points fee
       $order->calculate_totals(false);
-			$grand_total = (float)$order->get_total();
+      // Build amount manually from components
+      $items_total_after_discounts = 0.0;
+      foreach ($order->get_items() as $it) {
+        if ($it instanceof \WC_Order_Item_Product) {
+          $items_total_after_discounts += (float) $it->get_total();
+        }
+      }
+      $fees_total = 0.0;
+      foreach ($order->get_fees() as $fee) {
+        $fees_total += (float) $fee->get_total();
+      }
+      $shipping_total = (float) $order->get_shipping_total();
+      $grand_total = max(0.0, $items_total_after_discounts + $fees_total + $shipping_total);
 		} finally {
 			if ($order_id > 0) { wp_delete_post($order_id, true); }
 		}
