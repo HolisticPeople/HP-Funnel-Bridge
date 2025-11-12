@@ -23,7 +23,8 @@ class SettingsPage {
 				'env' => 'staging',
 				'allowed_origins' => [],
 				'hmac_secret' => '',
-				'funnel_registry' => [], // array of [id => name]
+				'funnel_registry' => [], // legacy: array of [id => name]
+				'funnels' => [], // new: array of [id, name, origin_staging, origin_production]
 			],
 		]);
 		add_settings_section('hp_fb_main', 'General', '__return_false', 'hp-funnel-bridge');
@@ -52,17 +53,35 @@ class SettingsPage {
 		}
 		$out['allowed_origins'] = array_values(array_unique($origins));
 		$out['hmac_secret'] = isset($value['hmac_secret']) ? trim((string)$value['hmac_secret']) : '';
-		$registry = [];
+		// Legacy registry (id => name)
+		$legacy = [];
 		if (!empty($value['funnel_registry']) && is_array($value['funnel_registry'])) {
-			foreach ($value['funnel_registry'] as $id => $name) {
-				$id = sanitize_key((string)$id);
-				$name = sanitize_text_field((string)$name);
-				if ($id !== '' && $name !== '') {
-					$registry[$id] = $name;
-				}
+            foreach ($value['funnel_registry'] as $id => $name) {
+                $id = sanitize_key((string)$id);
+                $name = sanitize_text_field((string)$name);
+                if ($id !== '' && $name !== '') { $legacy[$id] = $name; }
+            }
+        }
+        $out['funnel_registry'] = $legacy;
+		// New funnels structure
+		$funnels = [];
+		if (!empty($value['funnels']) && is_array($value['funnels'])) {
+			foreach ($value['funnels'] as $row) {
+				if (!is_array($row)) { continue; }
+				$id = isset($row['id']) ? sanitize_key((string)$row['id']) : '';
+				$name = isset($row['name']) ? sanitize_text_field((string)$row['name']) : '';
+				$origStg = isset($row['origin_staging']) ? trim((string)$row['origin_staging']) : '';
+				$origProd = isset($row['origin_production']) ? trim((string)$row['origin_production']) : '';
+				if ($id === '' || $name === '') { continue; }
+				$funnels[] = [
+					'id' => $id,
+					'name' => $name,
+					'origin_staging' => $origStg,
+					'origin_production' => $origProd,
+				];
 			}
 		}
-		$out['funnel_registry'] = $registry;
+		$out['funnels'] = $funnels;
 		return $out;
 	}
 
@@ -97,19 +116,41 @@ class SettingsPage {
 
 	public static function fieldRegistry(): void {
 		$opts = get_option('hp_fb_settings', []);
-		$reg = isset($opts['funnel_registry']) && is_array($opts['funnel_registry']) ? $opts['funnel_registry'] : [];
+		$rows = [];
+		// Prefer new 'funnels' structure
+		if (!empty($opts['funnels']) && is_array($opts['funnels'])) {
+			foreach ($opts['funnels'] as $f) {
+				$rows[] = [
+					'id' => (string)($f['id'] ?? ''),
+					'name' => (string)($f['name'] ?? ''),
+					'origin_staging' => (string)($f['origin_staging'] ?? ''),
+					'origin_production' => (string)($f['origin_production'] ?? ''),
+				];
+			}
+		} else {
+			// Back-compat: transform legacy registry to editable rows
+			$reg = isset($opts['funnel_registry']) && is_array($opts['funnel_registry']) ? $opts['funnel_registry'] : [];
+			foreach ($reg as $id => $name) {
+				$rows[] = ['id' => (string)$id, 'name' => (string)$name, 'origin_staging' => '', 'origin_production' => ''];
+			}
+		}
+		// Add one empty row for quick additions
+		$rows[] = ['id' => '', 'name' => '', 'origin_staging' => '', 'origin_production' => ''];
 		?>
-		<table class="widefat" style="max-width:760px;">
-			<thead><tr><th style="width:30%;">Funnel ID</th><th>Funnel Name</th></tr></thead>
+		<table class="widefat" style="max-width:960px;">
+			<thead><tr><th style="width:16%;">Funnel ID</th><th style="width:24%;">Funnel Name</th><th style="width:30%;">Staging Origin</th><th>Production Origin</th></tr></thead>
 			<tbody id="hp-fb-registry-rows">
-				<?php if (empty($reg)) : ?>
-					<tr><td><input type="text" name="hp_fb_settings[funnel_registry][default]" value="default" /></td><td><input type="text" name="hp_fb_settings[funnel_registry_names][default]" value="Default Funnel" disabled /></td></tr>
-				<?php else : foreach ($reg as $id => $name) : ?>
-					<tr><td><input type="text" name="hp_fb_settings[funnel_registry][<?php echo esc_attr($id); ?>]" value="<?php echo esc_attr($id); ?>" /></td><td><input type="text" value="<?php echo esc_attr($name); ?>" disabled /></td></tr>
-				<?php endforeach; endif; ?>
+				<?php foreach ($rows as $i => $r): ?>
+					<tr>
+						<td><input type="text" name="hp_fb_settings[funnels][<?php echo esc_attr((string)$i); ?>][id]" value="<?php echo esc_attr($r['id']); ?>" /></td>
+						<td><input type="text" name="hp_fb_settings[funnels][<?php echo esc_attr((string)$i); ?>][name]" value="<?php echo esc_attr($r['name']); ?>" /></td>
+						<td><input type="text" name="hp_fb_settings[funnels][<?php echo esc_attr((string)$i); ?>][origin_staging]" value="<?php echo esc_attr($r['origin_staging']); ?>" placeholder="https://staging.example.com" /></td>
+						<td><input type="text" name="hp_fb_settings[funnels][<?php echo esc_attr((string)$i); ?>][origin_production]" value="<?php echo esc_attr($r['origin_production']); ?>" placeholder="https://www.example.com" /></td>
+					</tr>
+				<?php endforeach; ?>
 			</tbody>
 		</table>
-		<p class="description">Enter IDs only; names can be stored in analytics meta by the calling funnel.</p>
+		<p class="description">Registry rows: ID and Name are required; add origins per environment. Global “Allowed Origins” above is best reserved for localhost or special cases.</p>
 		<?php
 	}
 

@@ -2,7 +2,7 @@
 /**
  * Plugin Name:       HP Funnel Bridge
  * Description:       Multi‑funnel bridge exposing REST endpoints for checkout, shipping rates, totals, and one‑click upsells. Reuses EAO (Stripe keys, ShipStation, YITH points) without modifying it.
- * Version:           0.1.1
+ * Version:           0.1.2
  * Requires at least: 6.0
  * Requires PHP:      7.4
  * Author:            Holistic People
@@ -15,7 +15,7 @@ if (!defined('ABSPATH')) {
 	exit;
 }
 
-define('HP_FB_PLUGIN_VERSION', '0.1.1');
+define('HP_FB_PLUGIN_VERSION', '0.1.2');
 define('HP_FB_PLUGIN_FILE', __FILE__);
 define('HP_FB_PLUGIN_DIR', plugin_dir_path(__FILE__));
 define('HP_FB_PLUGIN_URL', plugin_dir_url(__FILE__));
@@ -57,7 +57,21 @@ add_action('rest_api_init', function () {
 		$route = $request->get_route();
 		if (strpos($route, '/hp-funnel/v1/') !== false) {
 			$opts = get_option('hp_fb_settings', array());
+			$env = isset($opts['env']) && $opts['env'] === 'production' ? 'production' : 'staging';
 			$origins = isset($opts['allowed_origins']) ? (array)$opts['allowed_origins'] : array();
+			// Add per-funnel origins (staging or production) from registry (new structure)
+			if (!empty($opts['funnels']) && is_array($opts['funnels'])) {
+				foreach ($opts['funnels'] as $f) {
+					if (!is_array($f)) { continue; }
+					if ($env === 'staging' && !empty($f['origin_staging'])) {
+						$origins[] = (string)$f['origin_staging'];
+					}
+					if ($env === 'production' && !empty($f['origin_production'])) {
+						$origins[] = (string)$f['origin_production'];
+					}
+				}
+			}
+			$origins = array_values(array_unique(array_filter(array_map('trim', $origins))));
 			$origin_hdr = isset($_SERVER['HTTP_ORIGIN']) ? (string)$_SERVER['HTTP_ORIGIN'] : '';
 			if (!empty($origin_hdr) && (empty($origins) || in_array($origin_hdr, $origins, true))) {
 				header('Access-Control-Allow-Origin: ' . $origin_hdr);
