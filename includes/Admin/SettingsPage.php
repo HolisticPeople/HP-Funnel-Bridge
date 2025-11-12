@@ -22,7 +22,6 @@ class SettingsPage {
 			'default' => [
 				'env' => 'staging',
 				'allowed_origins' => [],
-				'hmac_secret' => '',
 				'funnel_registry' => [], // legacy: array of [id => name]
 				'funnels' => [], // new: array of [id, name, origin_staging, origin_production]
 			],
@@ -30,7 +29,6 @@ class SettingsPage {
 		add_settings_section('hp_fb_main', 'General', '__return_false', 'hp-funnel-bridge');
 		add_settings_field('hp_fb_env', 'Environment', [__CLASS__, 'fieldEnv'], 'hp-funnel-bridge', 'hp_fb_main');
 		add_settings_field('hp_fb_allowed_origins', 'Allowed Origins', [__CLASS__, 'fieldOrigins'], 'hp-funnel-bridge', 'hp_fb_main');
-		add_settings_field('hp_fb_hmac', 'HMAC Shared Secret (optional)', [__CLASS__, 'fieldHmac'], 'hp-funnel-bridge', 'hp_fb_main');
 		add_settings_field('hp_fb_registry', 'Funnel Registry', [__CLASS__, 'fieldRegistry'], 'hp-funnel-bridge', 'hp_fb_main');
 	}
 
@@ -52,7 +50,6 @@ class SettingsPage {
 			}
 		}
 		$out['allowed_origins'] = array_values(array_unique($origins));
-		$out['hmac_secret'] = isset($value['hmac_secret']) ? trim((string)$value['hmac_secret']) : '';
 		// Legacy registry (id => name)
 		$legacy = [];
 		if (!empty($value['funnel_registry']) && is_array($value['funnel_registry'])) {
@@ -138,7 +135,7 @@ class SettingsPage {
 		$rows[] = ['id' => '', 'name' => '', 'origin_staging' => '', 'origin_production' => ''];
 		?>
 		<table class="widefat" style="max-width:960px;">
-			<thead><tr><th style="width:16%;">Funnel ID</th><th style="width:24%;">Funnel Name</th><th style="width:30%;">Staging Origin</th><th>Production Origin</th></tr></thead>
+			<thead><tr><th style="width:16%;">Funnel ID</th><th style="width:24%;">Funnel Name</th><th style="width:30%;">Staging Origin</th><th>Production Origin</th><th style="width:90px;">Actions</th></tr></thead>
 			<tbody id="hp-fb-registry-rows">
 				<?php foreach ($rows as $i => $r): ?>
 					<tr>
@@ -146,11 +143,35 @@ class SettingsPage {
 						<td><input type="text" name="hp_fb_settings[funnels][<?php echo esc_attr((string)$i); ?>][name]" value="<?php echo esc_attr($r['name']); ?>" /></td>
 						<td><input type="text" name="hp_fb_settings[funnels][<?php echo esc_attr((string)$i); ?>][origin_staging]" value="<?php echo esc_attr($r['origin_staging']); ?>" placeholder="https://staging.example.com" /></td>
 						<td><input type="text" name="hp_fb_settings[funnels][<?php echo esc_attr((string)$i); ?>][origin_production]" value="<?php echo esc_attr($r['origin_production']); ?>" placeholder="https://www.example.com" /></td>
+						<td><button type="button" class="button button-secondary hp-fb-del-row">Delete</button></td>
 					</tr>
 				<?php endforeach; ?>
 			</tbody>
 		</table>
 		<p class="description">Registry rows: ID and Name are required; add origins per environment. Global “Allowed Origins” above is best reserved for localhost or special cases.</p>
+		<p><button type="button" class="button" id="hp-fb-add-funnel">Add Funnel</button></p>
+		<script>
+		(function(){
+			const tbody = document.getElementById('hp-fb-registry-rows');
+			const addBtn = document.getElementById('hp-fb-add-funnel');
+			function nextIndex() { return tbody.querySelectorAll('tr').length; }
+			function tpl(i){
+				return '<tr>' +
+					'<td><input type="text" name="hp_fb_settings[funnels]['+i+'][id]" value="" /></td>' +
+					'<td><input type="text" name="hp_fb_settings[funnels]['+i+'][name]" value="" /></td>' +
+					'<td><input type="text" name="hp_fb_settings[funnels]['+i+'][origin_staging]" value="" placeholder="https://staging.example.com" /></td>' +
+					'<td><input type="text" name="hp_fb_settings[funnels]['+i+'][origin_production]" value="" placeholder="https://www.example.com" /></td>' +
+					'<td><button type="button" class="button button-secondary hp-fb-del-row">Delete</button></td>' +
+				'</tr>';
+			}
+			if (addBtn) addBtn.addEventListener('click', function(){ tbody.insertAdjacentHTML('beforeend', tpl(nextIndex())); });
+			tbody.addEventListener('click', function(e){
+				if (e.target && e.target.classList.contains('hp-fb-del-row')) {
+					const tr = e.target.closest('tr'); if (tr) tr.remove();
+				}
+			});
+		})();
+		</script>
 		<?php
 	}
 
@@ -158,6 +179,7 @@ class SettingsPage {
 		?>
 		<div class="wrap">
 			<h1>HP Funnel Bridge</h1>
+			<p style="margin: -6px 0 14px; color:#666;">Version <?php echo esc_html( defined('HP_FB_PLUGIN_VERSION') ? HP_FB_PLUGIN_VERSION : '' ); ?></p>
 			<form method="post" action="options.php">
 				<?php
 				settings_fields('hp_fb_settings_group');

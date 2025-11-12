@@ -78,10 +78,17 @@ add_action('rest_api_init', function () {
 				header('Vary: Origin', false);
 			}
 			header('Access-Control-Allow-Methods: POST, OPTIONS');
-			header('Access-Control-Allow-Headers: Content-Type, Authorization, X-Idempotency-Key, X-HPFB-HMAC');
+			header('Access-Control-Allow-Headers: Content-Type, Authorization, X-Idempotency-Key');
 		}
 		return $served;
 	}, 10, 4);
+});
+
+// Add Settings link on the Plugins list row
+add_filter('plugin_action_links_' . plugin_basename(__FILE__), function($links) {
+	$url = admin_url('options-general.php?page=hp-funnel-bridge');
+	$links[] = '<a href="' . esc_url($url) . '">Settings</a>';
+	return $links;
 });
 
 // Register REST routes
