@@ -74,18 +74,26 @@ class TotalsController {
 				$order->add_item($ship);
 			}
 
-			// Points discount (preview only)
-			$pointsDiscount = 0.0;
-			if ($points_to_redeem > 0) {
-				$ps = new PointsService();
-				$pointsDiscount = $ps->pointsToMoney($points_to_redeem);
-				// Represent as a negative fee for preview
-				if ($pointsDiscount > 0) {
-					$order->add_fee('Points redemption (preview)', -1 * $pointsDiscount);
-				}
-			}
+      // First pass calculation to know product net (excludes shipping/tax)
+      $order->calculate_totals(false);
+      $products_gross = (float) $order->get_subtotal();
+      $discount_total = (float) $order->get_discount_total();
+      $products_net = max(0.0, $products_gross - $discount_total);
 
-			$order->calculate_totals(false);
+      // Points discount (preview only). Cap to products_net (no points on shipping).
+      $pointsDiscount = 0.0;
+      if ($points_to_redeem > 0 && $products_net > 0) {
+        $ps = new PointsService();
+        $pointsDiscount = min($ps->pointsToMoney($points_to_redeem), $products_net);
+        if ($pointsDiscount > 0) {
+          $order->add_fee('Points redemption (preview)', -1 * $pointsDiscount);
+          // Recalculate after applying the discount fee
+          $order->calculate_totals(false);
+        }
+      } else {
+        // Ensure totals present at least once
+        $order->calculate_totals(false);
+      }
 
 			return new WP_REST_Response([
 				'subtotal' => (float)$order->get_subtotal(),
@@ -93,7 +101,7 @@ class TotalsController {
 				'shipping_total' => (float)$order->get_shipping_total(),
 				'tax_total' => (float)$order->get_total_tax(),
 				'fees_total' => (float)$order->get_fees() ? array_sum(array_map(function($f){ return (float)$f->get_total(); }, $order->get_fees())) : 0.0,
-				'points_discount' => $pointsDiscount,
+        'points_discount' => (float)$pointsDiscount,
 				'grand_total' => (float)$order->get_total(),
 			]);
 		} finally {

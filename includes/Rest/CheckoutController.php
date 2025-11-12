@@ -87,16 +87,23 @@ class CheckoutController {
 				$ship->set_total((float)$selected_rate['amount']);
 				$order->add_item($ship);
 			}
-			// Points as negative fee now; webhook will reconcile via YITH
-			$ps = new PointsService();
-			$points_discount = 0.0;
-			if ($points_to_redeem > 0) {
-				$points_discount = $ps->pointsToMoney($points_to_redeem);
-				if ($points_discount > 0) {
-					$order->add_fee('Points redemption (pending)', -1 * $points_discount);
-				}
-			}
-			$order->calculate_totals(false);
+      // First calculation to know products net (points cannot cover shipping/tax)
+      $order->calculate_totals(false);
+      $products_gross = (float)$order->get_subtotal();
+      $discount_total = (float)$order->get_discount_total();
+      $products_net = max(0.0, $products_gross - $discount_total);
+
+      // Points as negative fee now; webhook will reconcile via YITH. Cap to products_net.
+      $ps = new PointsService();
+      $points_discount = 0.0;
+      if ($points_to_redeem > 0 && $products_net > 0) {
+        $points_discount = min($ps->pointsToMoney($points_to_redeem), $products_net);
+        if ($points_discount > 0) {
+          $order->add_fee('Points redemption (pending)', -1 * $points_discount);
+        }
+      }
+      // Final totals after points fee
+      $order->calculate_totals(false);
 			$grand_total = (float)$order->get_total();
 		} finally {
 			if ($order_id > 0) { wp_delete_post($order_id, true); }
