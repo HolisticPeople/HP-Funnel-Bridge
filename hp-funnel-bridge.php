@@ -101,4 +101,34 @@ add_action('rest_api_init', function () {
 	(new \HP_FB\Rest\WebhookController())->register_routes();
 });
 
+// Register lightweight hosted confirmation page: /hp-funnel-confirm?cs=CLIENT_SECRET
+add_action('init', function () {
+	add_rewrite_rule('^hp-funnel-confirm/?$', 'index.php?hp_fb_confirm=1', 'top');
+});
+add_filter('query_vars', function ($vars) {
+	$vars[] = 'hp_fb_confirm';
+	return $vars;
+});
+add_action('template_redirect', function () {
+	$flag = get_query_var('hp_fb_confirm');
+	if (!$flag) { return; }
+	$cs = isset($_GET['cs']) ? (string)$_GET['cs'] : '';
+	if ($cs === '') {
+		status_header(400);
+		echo '<!doctype html><meta charset="utf-8"><title>Missing client_secret</title><p>Missing client_secret (?cs=...)</p>';
+		exit;
+	}
+	$stripe = new \HP_FB\Stripe\Client();
+	if (!$stripe->isConfigured()) {
+		status_header(500);
+		echo '<!doctype html><meta charset="utf-8"><title>Stripe not configured</title><p>Stripe keys are missing.</p>';
+		exit;
+	}
+	$pub = esc_js($stripe->publishable);
+	$cs_js = esc_js($cs);
+	$here = esc_url(add_query_arg([]));
+	echo '<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>HP Funnel Payment</title><style>body{font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;margin:24px;}#checkout{max-width:520px;margin:0 auto;}button{padding:10px 14px;border:1px solid #ccc;border-radius:6px;background:#111;color:#fff;cursor:pointer;}#messages{margin-top:12px;color:#c00}</style><script src="https://js.stripe.com/v3/"></script></head><body><div id="checkout"><h2>Complete Payment</h2><div id="element"></div><div style="margin-top:12px;"><button id="pay">Pay</button></div><div id="messages"></div></div><script>(async function(){const stripe=Stripe("'.$pub.'");const elements=stripe.elements({clientSecret:"'.$cs_js.'"});const paymentElement=elements.create("payment");paymentElement.mount("#element");const btn=document.getElementById("pay");const msg=document.getElementById("messages");btn.addEventListener("click",async()=>{btn.disabled=true;msg.textContent="Processing...";const res=await stripe.confirmPayment({elements,clientSecret:"'.$cs_js.'",confirmParams:{return_url:"'.$here.'"},redirect:"if_required"});if(res.error){msg.textContent=res.error.message||"Payment failed";btn.disabled=false;}else{msg.textContent="Payment processed. You can close this page.";btn.disabled=true;}})})();</script></body></html>';
+	exit;
+});
+
 
