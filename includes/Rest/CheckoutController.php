@@ -99,7 +99,12 @@ class CheckoutController {
       if ($points_to_redeem > 0 && $products_net > 0) {
         $points_discount = min($ps->pointsToMoney($points_to_redeem), $products_net);
         if ($points_discount > 0) {
-          $order->add_fee('Points redemption (pending)', -1 * $points_discount);
+          // Add as a negative fee item (correct API)
+          $fee = new \WC_Order_Item_Fee();
+          $fee->set_name('Points redemption (pending)');
+          $fee->set_amount(-1 * $points_discount);
+          $fee->set_total(-1 * $points_discount);
+          $order->add_item($fee);
         }
       }
       // Final totals after points fee

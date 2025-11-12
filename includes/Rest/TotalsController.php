@@ -86,7 +86,11 @@ class TotalsController {
         $ps = new PointsService();
         $pointsDiscount = min($ps->pointsToMoney($points_to_redeem), $products_net);
         if ($pointsDiscount > 0) {
-          $order->add_fee('Points redemption (preview)', -1 * $pointsDiscount);
+          $fee = new \WC_Order_Item_Fee();
+          $fee->set_name('Points redemption (preview)');
+          $fee->set_amount(-1 * $pointsDiscount);
+          $fee->set_total(-1 * $pointsDiscount);
+          $order->add_item($fee);
         }
       } else {
         $pointsDiscount = 0.0;
