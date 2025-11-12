@@ -19,8 +19,12 @@ class ShipStationController {
 	}
 
 	public function handle(WP_REST_Request $request) {
+		// Ensure EAO ShipStation helpers are loaded even if EAO loads them only in admin
 		if (!function_exists('eao_build_shipstation_rates_request') || !function_exists('eao_get_shipstation_carrier_rates')) {
-			return new WP_Error('dependency_missing', 'EAO ShipStation utilities not available', ['status' => 500]);
+			$this->tryLoadEaoShipStation();
+			if (!function_exists('eao_build_shipstation_rates_request') || !function_exists('eao_get_shipstation_carrier_rates')) {
+				return new WP_Error('dependency_missing', 'EAO ShipStation utilities not available', ['status' => 500]);
+			}
 		}
 
 		$address = (array) $request->get_param('address');
@@ -78,6 +82,18 @@ class ShipStationController {
 				wp_delete_post($order_id, true);
 			}
 		}
+	}
+
+	/**
+	 * Attempt to include EAO ShipStation helper files when functions are not available in non-admin context.
+	 */
+	private function tryLoadEaoShipStation(): void {
+		// Common slug for EAO
+		$base = trailingslashit(WP_PLUGIN_DIR) . 'enhanced-admin-order-plugin/';
+		$utils = $base . 'eao-shipstation-utils.php';
+		$core  = $base . 'eao-shipstation-core.php';
+		if (file_exists($utils)) { require_once $utils; }
+		if (file_exists($core)) { require_once $core; }
 	}
 
 	private function applyAddress($order, string $type, array $addr): void {
