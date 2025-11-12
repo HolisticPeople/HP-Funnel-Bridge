@@ -57,23 +57,47 @@ class ShipStationController {
 			$this->applyAddress($order, 'shipping', $address);
 			$order->save();
 
-			// Build request via EAO helper and fetch rates
-			$req = \eao_build_shipstation_rates_request($order);
-			if (!$req || !is_array($req)) {
+			// Build base request via EAO helper
+			$base_request = \eao_build_shipstation_rates_request($order);
+			if (!$base_request || !is_array($base_request)) {
 				return new WP_Error('bad_request', 'Could not prepare ShipStation request', ['status' => 400]);
 			}
-			$ratesResult = \eao_get_shipstation_carrier_rates($req);
-			if (!is_array($ratesResult) || empty($ratesResult['success'])) {
-				$msg = is_array($ratesResult) && !empty($ratesResult['message']) ? (string)$ratesResult['message'] : 'Failed to fetch rates';
-				return new WP_Error('shipstation_error', $msg, ['status' => 502]);
+
+			// Mirror EAO logic: iterate carriers and customize UPS
+			$default_carriers = array('stamps_com', 'ups_walleted');
+			$carriers_to_try = apply_filters('eao_shipstation_carriers_to_query', $default_carriers);
+			if (!is_array($carriers_to_try)) { $carriers_to_try = $default_carriers; }
+
+			$all_rates = array();
+			$carrier_errors = array();
+
+			foreach ($carriers_to_try as $carrier_code) {
+				if (!is_string($carrier_code) || $carrier_code === '') { continue; }
+				$request_data = $base_request;
+				$request_data['carrierCode'] = $carrier_code;
+				if (($carrier_code === 'ups_walleted' || $carrier_code === 'ups') && function_exists('eao_customize_ups_request')) {
+					$request_data = \eao_customize_ups_request($request_data);
+				}
+				$carrier_rates_result = \eao_get_shipstation_carrier_rates($request_data);
+				if (isset($carrier_rates_result['success']) && $carrier_rates_result['success'] && isset($carrier_rates_result['rates']) && is_array($carrier_rates_result['rates']) && !empty($carrier_rates_result['rates'])) {
+					foreach ($carrier_rates_result['rates'] as &$rate) {
+						if (is_array($rate) && !isset($rate['carrierCode'])) { $rate['carrierCode'] = $carrier_code; }
+					}
+					$all_rates = array_merge($all_rates, $carrier_rates_result['rates']);
+				} else {
+					$carrier_errors[$carrier_code] = isset($carrier_rates_result['message']) ? (string)$carrier_rates_result['message'] : 'Unknown carrier error';
+				}
 			}
-			$rates = isset($ratesResult['rates']) && is_array($ratesResult['rates']) ? $ratesResult['rates'] : [];
-			// Format (if helper exists)
+
+			if (empty($all_rates)) {
+				$err = !empty($carrier_errors) ? 'HTTP Error: ' . implode('; ', array_map(function($k,$v){ return $k.': '.$v; }, array_keys($carrier_errors), array_values($carrier_errors))) : 'No rates';
+				return new WP_Error('shipstation_error', $err, ['status' => 502]);
+			}
+
+			$rates = $all_rates;
 			if (function_exists('eao_format_shipstation_rates_response')) {
 				$fmt = \eao_format_shipstation_rates_response($rates);
-				if (is_array($fmt) && isset($fmt['rates'])) {
-					$rates = $fmt['rates'];
-				}
+				if (is_array($fmt) && isset($fmt['rates'])) { $rates = $fmt['rates']; }
 			}
 			return new WP_REST_Response(['rates' => $rates]);
 		} finally {
