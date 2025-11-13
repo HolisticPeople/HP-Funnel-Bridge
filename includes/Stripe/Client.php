@@ -55,7 +55,19 @@ class Client {
 	public function createOrGetCustomer(string $email, string $name = '', int $userId = 0): ?string {
 		// Reuse stored customer id if set
 		if ($userId > 0) {
-			$existing = get_user_meta($userId, '_hp_fb_stripe_customer_id', true);
+			$metaKeyCurrent = $this->mode === 'live' ? '_hp_fb_stripe_customer_id_live' : '_hp_fb_stripe_customer_id_test';
+			$existing = get_user_meta($userId, $metaKeyCurrent, true);
+			// Back-compat: if a legacy id exists without mode suffix, try it only when modes match pragmatically
+			if (!$existing) {
+				$legacy = get_user_meta($userId, '_hp_fb_stripe_customer_id', true);
+				if (is_string($legacy) && $legacy !== '') {
+					// Do NOT return legacy when running in test mode and legacy is likely a live id, or vice versa.
+					// Instead, ignore legacy so a proper customer is created in the correct Stripe mode.
+					if ($this->mode === 'live') {
+						$existing = $legacy; // prefer legacy as live if present
+					}
+				}
+			}
 			if (is_string($existing) && $existing !== '') {
 				return $existing;
 			}
@@ -72,7 +84,8 @@ class Client {
 		if (!is_array($data) || empty($data['id'])) { return null; }
 		$cus = (string)$data['id'];
 		if ($userId > 0) {
-			update_user_meta($userId, '_hp_fb_stripe_customer_id', $cus);
+			$metaKeyCurrent = $this->mode === 'live' ? '_hp_fb_stripe_customer_id_live' : '_hp_fb_stripe_customer_id_test';
+			update_user_meta($userId, $metaKeyCurrent, $cus);
 		}
 		return $cus;
 	}
