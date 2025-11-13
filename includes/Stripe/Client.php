@@ -8,27 +8,36 @@ class Client {
 	public string $publishable;
 	public string $mode = 'test'; // 'test' or 'live'
 
-	public function __construct() {
+	/**
+	 * @param string|null $modeOverride 'test' | 'live' to force a mode (per-funnel), or null to derive from settings env
+	 */
+	public function __construct(?string $modeOverride = null) {
 		$opts = get_option('hp_fb_settings', []);
 		$env = isset($opts['env']) && $opts['env'] === 'production' ? 'production' : 'staging';
 		$eao = get_option('eao_stripe_settings', []);
-		if ($env === 'production') {
-			$this->secret = (string)($eao['live_secret'] ?? '');
-			$this->publishable = (string)($eao['live_publishable'] ?? '');
-			$this->mode = 'live';
-		} else {
-			// Prefer test keys, but if missing, fall back to live keys (user requested live on staging)
-			$test_secret = (string)($eao['test_secret'] ?? '');
-			$test_pub    = (string)($eao['test_publishable'] ?? '');
-			if ($test_secret !== '' && $test_pub !== '') {
-				$this->secret = $test_secret;
-				$this->publishable = $test_pub;
-				$this->mode = 'test';
+		$useMode = $modeOverride;
+		if ($useMode !== 'test' && $useMode !== 'live') {
+			// Derive from global environment
+			if ($env === 'production') {
+				$useMode = 'live';
 			} else {
+				$useMode = 'test';
+			}
+		}
+		if ($useMode === 'test') {
+			$this->secret = (string)($eao['test_secret'] ?? '');
+			$this->publishable = (string)($eao['test_publishable'] ?? '');
+			$this->mode = 'test';
+			// If test keys missing, hard-fallback to live to avoid blocking, but record mode
+			if ($this->secret === '' || $this->publishable === '') {
 				$this->secret = (string)($eao['live_secret'] ?? '');
 				$this->publishable = (string)($eao['live_publishable'] ?? '');
 				$this->mode = 'live';
 			}
+		} else { // live
+			$this->secret = (string)($eao['live_secret'] ?? '');
+			$this->publishable = (string)($eao['live_publishable'] ?? '');
+			$this->mode = 'live';
 		}
 	}
 

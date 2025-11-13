@@ -23,7 +23,7 @@ class SettingsPage {
 				'env' => 'staging',
 				'allowed_origins' => [],
 				'funnel_registry' => [], // legacy: array of [id => name]
-				'funnels' => [], // new: array of [id, name, origin_staging, origin_production]
+				'funnels' => [], // new: array of [id, name, origin_staging, origin_production, mode_staging, mode_production]
 			],
 		]);
 		add_settings_section('hp_fb_main', 'General', '__return_false', 'hp-funnel-bridge');
@@ -69,12 +69,16 @@ class SettingsPage {
 				$name = isset($row['name']) ? sanitize_text_field((string)$row['name']) : '';
 				$origStg = isset($row['origin_staging']) ? trim((string)$row['origin_staging']) : '';
 				$origProd = isset($row['origin_production']) ? trim((string)$row['origin_production']) : '';
+				$modeStg = isset($row['mode_staging']) && in_array($row['mode_staging'], ['test','live'], true) ? $row['mode_staging'] : 'test';
+				$modeProd = isset($row['mode_production']) && in_array($row['mode_production'], ['test','live'], true) ? $row['mode_production'] : 'live';
 				if ($id === '' || $name === '') { continue; }
 				$funnels[] = [
 					'id' => $id,
 					'name' => $name,
 					'origin_staging' => $origStg,
 					'origin_production' => $origProd,
+					'mode_staging' => $modeStg,
+					'mode_production' => $modeProd,
 				];
 			}
 		}
@@ -134,15 +138,27 @@ class SettingsPage {
 		// Add one empty row for quick additions
 		$rows[] = ['id' => '', 'name' => '', 'origin_staging' => '', 'origin_production' => ''];
 		?>
-		<table class="widefat" style="max-width:960px;">
-			<thead><tr><th style="width:16%;">Funnel ID</th><th style="width:24%;">Funnel Name</th><th style="width:30%;">Staging Origin</th><th>Production Origin</th><th style="width:90px;">Actions</th></tr></thead>
+		<table class="widefat" style="max-width:100%;">
+			<thead><tr><th style="width:12%;">Funnel ID</th><th style="width:18%;">Funnel Name</th><th style="width:24%;">Staging Origin</th><th style="width:10%;">Staging Mode</th><th style="width:24%;">Production Origin</th><th style="width:10%;">Production Mode</th><th style="width:90px;">Actions</th></tr></thead>
 			<tbody id="hp-fb-registry-rows">
 				<?php foreach ($rows as $i => $r): ?>
 					<tr>
 						<td><input type="text" name="hp_fb_settings[funnels][<?php echo esc_attr((string)$i); ?>][id]" value="<?php echo esc_attr($r['id']); ?>" /></td>
 						<td><input type="text" name="hp_fb_settings[funnels][<?php echo esc_attr((string)$i); ?>][name]" value="<?php echo esc_attr($r['name']); ?>" /></td>
 						<td><input type="text" name="hp_fb_settings[funnels][<?php echo esc_attr((string)$i); ?>][origin_staging]" value="<?php echo esc_attr($r['origin_staging']); ?>" placeholder="https://staging.example.com" /></td>
+						<td>
+							<select name="hp_fb_settings[funnels][<?php echo esc_attr((string)$i); ?>][mode_staging]">
+								<option value="test" <?php selected(($r['mode_staging'] ?? 'test'), 'test'); ?>>Test</option>
+								<option value="live" <?php selected(($r['mode_staging'] ?? 'test'), 'live'); ?>>Live</option>
+							</select>
+						</td>
 						<td><input type="text" name="hp_fb_settings[funnels][<?php echo esc_attr((string)$i); ?>][origin_production]" value="<?php echo esc_attr($r['origin_production']); ?>" placeholder="https://www.example.com" /></td>
+						<td>
+							<select name="hp_fb_settings[funnels][<?php echo esc_attr((string)$i); ?>][mode_production]">
+								<option value="live" <?php selected(($r['mode_production'] ?? 'live'), 'live'); ?>>Live</option>
+								<option value="test" <?php selected(($r['mode_production'] ?? 'live'), 'test'); ?>>Test</option>
+							</select>
+						</td>
 						<td><button type="button" class="button button-secondary hp-fb-del-row">Delete</button></td>
 					</tr>
 				<?php endforeach; ?>
@@ -160,7 +176,9 @@ class SettingsPage {
 					'<td><input type="text" name="hp_fb_settings[funnels]['+i+'][id]" value="" /></td>' +
 					'<td><input type="text" name="hp_fb_settings[funnels]['+i+'][name]" value="" /></td>' +
 					'<td><input type="text" name="hp_fb_settings[funnels]['+i+'][origin_staging]" value="" placeholder="https://staging.example.com" /></td>' +
+					'<td><select name="hp_fb_settings[funnels]['+i+'][mode_staging]"><option value="test" selected>Test</option><option value="live">Live</option></select></td>' +
 					'<td><input type="text" name="hp_fb_settings[funnels]['+i+'][origin_production]" value="" placeholder="https://www.example.com" /></td>' +
+					'<td><select name="hp_fb_settings[funnels]['+i+'][mode_production]"><option value="live" selected>Live</option><option value="test">Test</option></select></td>' +
 					'<td><button type="button" class="button button-secondary hp-fb-del-row">Delete</button></td>' +
 				'</tr>';
 			}

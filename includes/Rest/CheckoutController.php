@@ -22,7 +22,20 @@ class CheckoutController {
 	}
 
 	public function handle(WP_REST_Request $request) {
-		$stripe = new StripeClient();
+		// Determine per-funnel Stripe mode override if configured
+		$opts = get_option('hp_fb_settings', []);
+		$env = isset($opts['env']) && $opts['env'] === 'production' ? 'production' : 'staging';
+		$modeOverride = null;
+		if (!empty($opts['funnels']) && is_array($opts['funnels']) && $request->get_param('funnel_id')) {
+			$fid = (string)$request->get_param('funnel_id');
+			foreach ($opts['funnels'] as $f) {
+				if (is_array($f) && !empty($f['id']) && (string)$f['id'] === $fid) {
+					$modeOverride = ($env === 'production') ? ($f['mode_production'] ?? null) : ($f['mode_staging'] ?? null);
+					break;
+				}
+			}
+		}
+		$stripe = new StripeClient(($modeOverride === 'test' || $modeOverride === 'live') ? $modeOverride : null);
 		if (!$stripe->isConfigured()) {
 			return new WP_Error('stripe_not_configured', 'Stripe keys are missing in EAO settings', ['status' => 500]);
 		}
