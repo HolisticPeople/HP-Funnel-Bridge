@@ -6,6 +6,7 @@ use WP_REST_Response;
 use WP_Error;
 use WC_Order_Item_Product;
 use WC_Order_Item_Shipping;
+use HP_FB\Util\Resolver;
 
 if (!defined('ABSPATH')) { exit; }
 
@@ -41,11 +42,8 @@ class ShipStationController {
 			$order = wc_create_order(['status' => 'auto-draft']);
 			$order_id = $order->get_id();
 			foreach ($items as $it) {
-				$product_id = isset($it['product_id']) ? (int)$it['product_id'] : 0;
-				$variation_id = isset($it['variation_id']) ? (int)$it['variation_id'] : 0;
 				$qty = max(1, (int)($it['qty'] ?? 1));
-				if ($product_id <= 0) { continue; }
-				$product = wc_get_product($variation_id > 0 ? $variation_id : $product_id);
+				$product = Resolver::resolveProductFromItem((array)$it);
 				if (!$product) { continue; }
 				$item = new WC_Order_Item_Product();
 				$item->set_product($product);
