@@ -27,7 +27,7 @@ class SettingsPage {
 			],
 		]);
 		add_settings_section('hp_fb_main', 'General', '__return_false', 'hp-funnel-bridge');
-		add_settings_field('hp_fb_env', 'Environment', [__CLASS__, 'fieldEnv'], 'hp-funnel-bridge', 'hp_fb_main');
+		// Removed global Environment selector; per-funnel modes are used instead.
 		add_settings_field('hp_fb_allowed_origins', 'Allowed Origins', [__CLASS__, 'fieldOrigins'], 'hp-funnel-bridge', 'hp_fb_main');
 		add_settings_field('hp_fb_registry', 'Funnel Registry', [__CLASS__, 'fieldRegistry'], 'hp-funnel-bridge', 'hp_fb_main');
 	}
@@ -138,7 +138,12 @@ class SettingsPage {
 		// Add one empty row for quick additions
 		$rows[] = ['id' => '', 'name' => '', 'origin_staging' => '', 'origin_production' => ''];
 		?>
-		<table class="widefat" style="max-width:100%;">
+		<style>
+			/* Compact layout */
+			table.hp-fb-table.widefat td, table.hp-fb-table.widefat th { padding:6px 8px; }
+			table.hp-fb-table.widefat input[type="text"], table.hp-fb-table.widefat select { width:100%; margin:0; }
+		</style>
+		<table class="widefat hp-fb-table" style="max-width:100%; table-layout:fixed;">
 			<thead><tr><th style="width:12%;">Funnel ID</th><th style="width:18%;">Funnel Name</th><th style="width:24%;">Staging Origin</th><th style="width:10%;">Staging Mode</th><th style="width:24%;">Production Origin</th><th style="width:10%;">Production Mode</th><th style="width:90px;">Actions</th></tr></thead>
 			<tbody id="hp-fb-registry-rows">
 				<?php foreach ($rows as $i => $r): ?>

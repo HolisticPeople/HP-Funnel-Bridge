@@ -24,13 +24,22 @@ class CheckoutController {
 	public function handle(WP_REST_Request $request) {
 		// Determine per-funnel Stripe mode override if configured
 		$opts = get_option('hp_fb_settings', []);
-		$env = isset($opts['env']) && $opts['env'] === 'production' ? 'production' : 'staging';
 		$modeOverride = null;
 		if (!empty($opts['funnels']) && is_array($opts['funnels']) && $request->get_param('funnel_id')) {
 			$fid = (string)$request->get_param('funnel_id');
+			$currentHost = parse_url(home_url(), PHP_URL_HOST);
 			foreach ($opts['funnels'] as $f) {
 				if (is_array($f) && !empty($f['id']) && (string)$f['id'] === $fid) {
-					$modeOverride = ($env === 'production') ? ($f['mode_production'] ?? null) : ($f['mode_staging'] ?? null);
+					$stgHost = !empty($f['origin_staging']) ? parse_url((string)$f['origin_staging'], PHP_URL_HOST) : null;
+					$prodHost = !empty($f['origin_production']) ? parse_url((string)$f['origin_production'], PHP_URL_HOST) : null;
+					if ($currentHost && $stgHost && $currentHost === $stgHost) {
+						$modeOverride = $f['mode_staging'] ?? 'test';
+					} elseif ($currentHost && $prodHost && $currentHost === $prodHost) {
+						$modeOverride = $f['mode_production'] ?? 'live';
+					} else {
+						// Fallback: if not matched, prefer staging mode
+						$modeOverride = $f['mode_staging'] ?? 'test';
+					}
 					break;
 				}
 			}
