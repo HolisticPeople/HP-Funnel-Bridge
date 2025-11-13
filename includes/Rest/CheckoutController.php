@@ -182,8 +182,8 @@ class CheckoutController {
 			'amount' => $amount_cents,
 			'currency' => strtolower(get_woocommerce_currency('USD') ?: 'usd'),
 			'customer' => $cus,
-			// Explicitly limit to card to hide Link/Bank and "save for faster checkout" block
-			'payment_method_types[0]' => 'card',
+			// Explicitly limit to card to hide Link/Bank
+			'payment_method_types[]' => 'card',
 			'metadata[order_draft_id]' => $draft_id,
 			'metadata[funnel_id]' => $funnel_id,
 			'metadata[funnel_name]' => $funnel_name,
