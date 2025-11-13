@@ -148,13 +148,13 @@ class CheckoutController {
 			if ($order_id > 0) { wp_delete_post($order_id, true); }
 		}
 
-		// Stripe customer
+		// We intentionally do not attach a Customer in test flows to suppress Link "save info" UI.
 		$name = trim(($customer['first_name'] ?? '') . ' ' . ($customer['last_name'] ?? ''));
 		$user = get_user_by('email', $email);
-		$cus = $stripe->createOrGetCustomer($email, $name, $user ? (int)$user->ID : 0);
-		if (!$cus) {
-			return new WP_Error('stripe_customer', 'Could not create Stripe customer', ['status' => 502]);
-		}
+		$cus = null;
+		// If you want receipts associated to a customer, uncomment below two lines.
+		// $cus = $stripe->createOrGetCustomer($email, $name, $user ? (int)$user->ID : 0);
+		// if (!$cus) { return new WP_Error('stripe_customer', 'Could not create Stripe customer', ['status' => 502]); }
 
 		// Create draft
 		$draftStore = new OrderDraftStore();
@@ -181,7 +181,6 @@ class CheckoutController {
 		$params = [
 			'amount' => $amount_cents,
 			'currency' => strtolower(get_woocommerce_currency('USD') ?: 'usd'),
-			'customer' => $cus,
 			// Explicitly limit to card to hide Link/Bank
 			'payment_method_types[]' => 'card',
 			'metadata[order_draft_id]' => $draft_id,
