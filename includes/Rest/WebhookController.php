@@ -91,6 +91,10 @@ class WebhookController {
 		}
 		// Points redemption (requires user)
 		$points_to_redeem = isset($draft['points_to_redeem']) ? (int)$draft['points_to_redeem'] : 0;
+		// Ensure EAO YITH points helpers are available outside admin (Bridge context)
+		if ($points_to_redeem > 0 && $user && !function_exists('eao_process_yith_points_redemption')) {
+			$this->tryLoadEaoYithPoints();
+		}
 		if ($points_to_redeem > 0 && $user && function_exists('eao_process_yith_points_redemption')) {
 			$order->save(); // ensure ID before processing
 			$res = \eao_process_yith_points_redemption($order->get_id(), ['eao_points_to_redeem' => $points_to_redeem]);
@@ -108,6 +112,12 @@ class WebhookController {
 		if (!empty($draft['stripe_customer'])) {
 			$order->update_meta_data('_hp_fb_stripe_customer_id', (string)$draft['stripe_customer']);
 		}
+
+		// Set gateway so refunds work in Woo admin
+		if (method_exists($order, 'set_payment_method')) { $order->set_payment_method('hp_fb_stripe'); }
+		if (method_exists($order, 'set_payment_method_title')) { $order->set_payment_method_title('HP Funnel Bridge (Stripe)'); }
+		$order->update_meta_data('_payment_method', 'hp_fb_stripe');
+		$order->update_meta_data('_payment_method_title', 'HP Funnel Bridge (Stripe)');
 
 		// Funnel note and analytics
 		$funnel_name = isset($draft['funnel_name']) ? (string)$draft['funnel_name'] : 'Funnel';
@@ -131,6 +141,24 @@ class WebhookController {
 		$store->delete($draft_id);
 
 		return new WP_REST_Response(['ok' => true, 'order_id' => $order->get_id()]);
+	}
+
+	/**
+	 * Attempt to include EAO YITH Points helpers when functions are not available in non-admin context.
+	 * We set DOING_AJAX to true temporarily so EAO's core initializes outside wp-admin.
+	 */
+	private function tryLoadEaoYithPoints(): void {
+		$base = trailingslashit(WP_PLUGIN_DIR) . 'enhanced-admin-order-plugin/';
+		$core = $base . 'eao-yith-points-core.php';
+		$save = $base . 'eao-yith-points-save.php';
+		$unsetAjax = false;
+		if (!defined('DOING_AJAX')) {
+			define('DOING_AJAX', true);
+			$unsetAjax = true;
+		}
+		if (file_exists($core)) { require_once $core; }
+		if (file_exists($save)) { require_once $save; }
+		// no need to unset DOING_AJAX; harmless to keep defined for request lifetime
 	}
 
 	private function applyAddress($order, string $type, array $addr): void {

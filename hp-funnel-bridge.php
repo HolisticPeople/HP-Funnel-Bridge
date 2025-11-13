@@ -2,7 +2,7 @@
 /**
  * Plugin Name:       HP Funnel Bridge
  * Description:       Multi‑funnel bridge exposing REST endpoints for checkout, shipping rates, totals, and one‑click upsells. Reuses EAO (Stripe keys, ShipStation, YITH points) without modifying it.
- * Version:           0.2.0
+ * Version:           0.2.2
  * Requires at least: 6.0
  * Requires PHP:      7.4
  * Author:            Holistic People
@@ -15,7 +15,7 @@ if (!defined('ABSPATH')) {
 	exit;
 }
 
-define('HP_FB_PLUGIN_VERSION', '0.2.0');
+define('HP_FB_PLUGIN_VERSION', '0.2.2');
 define('HP_FB_PLUGIN_FILE', __FILE__);
 define('HP_FB_PLUGIN_DIR', plugin_dir_path(__FILE__));
 define('HP_FB_PLUGIN_URL', plugin_dir_url(__FILE__));
@@ -138,6 +138,12 @@ add_action('template_redirect', function () {
 	$here_json = wp_json_encode($here);
 	echo '<div id="element"></div><div style="margin-top:12px;"><button id="pay" disabled>Pay</button></div><div id="messages"></div></div><script>(async function(){try{var pub='.$pub_json.';var cs='.$cs_json.';var ret='.$here_json.';var stripe=Stripe(pub);var elements=stripe.elements({clientSecret:cs});var paymentElement;try{paymentElement=elements.create("payment");paymentElement.mount("#element");}catch(pe){var m=document.getElementById("messages");if(m)m.textContent=(pe&&pe.message)?pe.message:"Failed to load payment fields";return;}var btn=document.getElementById("pay");var msg=document.getElementById("messages");var amt=document.getElementById("amount");function bindCopy(){var nodes=document.querySelectorAll(".copy");nodes.forEach(function(n){n.addEventListener("click",function(){var sel=n.getAttribute("data-copy");var el=document.querySelector(sel);if(!el) return;var txt=el.textContent||"";if(navigator.clipboard&&navigator.clipboard.writeText){navigator.clipboard.writeText(txt);}else{var ta=document.createElement("textarea");ta.value=txt;document.body.appendChild(ta);ta.select();try{document.execCommand("copy");}catch(e){}document.body.removeChild(ta);}});});}bindCopy();try{var pi=await stripe.retrievePaymentIntent(cs);if(pi&&pi.paymentIntent){var cents=pi.paymentIntent.amount||0;var cur=(pi.paymentIntent.currency||"usd").toUpperCase();amt.textContent="Amount: $"+(cents/100).toFixed(2)+" "+cur;}}catch(e){}paymentElement.on("change",function(e){btn.disabled=!e.complete;msg.textContent="";});btn.addEventListener("click",async function(){btn.disabled=true;msg.textContent="Processing...";try{var submitRes=await elements.submit();if(submitRes&&submitRes.error){msg.textContent=submitRes.error.message||"Please check your details";btn.disabled=false;return;}var res=await stripe.confirmPayment({elements:elements,clientSecret:cs,confirmParams:{return_url:ret},redirect:"if_required"});if(res.error){msg.textContent=(res.error&&res.error.message)?res.error.message:"Payment failed";btn.disabled=false;}else{msg.textContent="Payment processed. You can close this page.";btn.disabled=true;}}catch(err){msg.textContent=(err&&err.message)?err.message:"Payment failed";btn.disabled=false;}});}catch(_err){var m=document.getElementById("messages");if(m)m.textContent="Failed to initialize payment";}})();</script></body></html>';
 	exit;
+});
+
+// Register refund-capable gateway for Bridge orders
+add_filter('woocommerce_payment_gateways', function ($gateways) {
+	$gateways[] = \HP_FB\Gateway\StripeGateway::class;
+	return $gateways;
 });
 
 

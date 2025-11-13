@@ -148,13 +148,11 @@ class CheckoutController {
 			if ($order_id > 0) { wp_delete_post($order_id, true); }
 		}
 
-		// We intentionally do not attach a Customer in test flows to suppress Link "save info" UI.
+		// Create/reuse a Stripe customer so we can support one‑click bumps (off‑session charge)
 		$name = trim(($customer['first_name'] ?? '') . ' ' . ($customer['last_name'] ?? ''));
 		$user = get_user_by('email', $email);
-		$cus = null;
-		// If you want receipts associated to a customer, uncomment below two lines.
-		// $cus = $stripe->createOrGetCustomer($email, $name, $user ? (int)$user->ID : 0);
-		// if (!$cus) { return new WP_Error('stripe_customer', 'Could not create Stripe customer', ['status' => 502]); }
+		$cus = $stripe->createOrGetCustomer($email, $name, $user ? (int)$user->ID : 0);
+		if (!$cus) { return new WP_Error('stripe_customer', 'Could not create Stripe customer', ['status' => 502]); }
 
 		// Create draft
 		$draftStore = new OrderDraftStore();
@@ -181,8 +179,13 @@ class CheckoutController {
 		$params = [
 			'amount' => $amount_cents,
 			'currency' => strtolower(get_woocommerce_currency('USD') ?: 'usd'),
+			'customer' => $cus,
 			// Explicitly limit to card to hide Link/Bank
 			'payment_method_types[]' => 'card',
+			// Persist for one‑click off‑session bump
+			'payment_method_options[card][setup_future_usage]' => 'off_session',
+			// Helpful description in Stripe dashboard
+			'description' => 'HolisticPeople - ' . $funnel_name,
 			'metadata[order_draft_id]' => $draft_id,
 			'metadata[funnel_id]' => $funnel_id,
 			'metadata[funnel_name]' => $funnel_name,
