@@ -64,10 +64,15 @@ jobs:
           PLUGIN_BASE="${{ secrets.KINSTA_PLUGINS_BASE }}"
           if [ -z "$PLUGIN_BASE" ]; then PLUGIN_BASE="${{ env.PLUGINS_BASE_DEFAULT }}"; fi
           PLUGIN_PATH="${PLUGIN_BASE}/${{ env.PLUGIN_SLUG }}"
+          echo "Deploying to: $PLUGIN_PATH"
+          # Safety guard: refuse to run if target is the plugins root
+          case "$PLUGIN_PATH" in
+            */plugins|*/plugins/) echo "Refusing to deploy to plugins root. Check KINSTA_PLUGINS_BASE"; exit 1;;
+          esac
           rsync -az --delete \
             -e "ssh -p ${{ secrets.KINSTA_PORT }}" \
             --exclude ".git/" --exclude ".github/" --exclude ".gitignore" \
-            ./ "${{ secrets.KINSTA_USER }}@${{ secrets.KINSTA_HOST }}:${PLUGIN_PATH}"
+            ./ "${{ secrets.KINSTA_USER }}@${{ secrets.KINSTA_HOST }}:${PLUGIN_PATH}/"
 
       - name: Post-deploy (wp-cli)
         uses: appleboy/ssh-action@v1.0.3
@@ -122,10 +127,14 @@ jobs:
           PLUGIN_BASE="${{ secrets.KINSTAPROD_PLUGINS_BASE }}"
           if [ -z "$PLUGIN_BASE" ]; then PLUGIN_BASE="${{ env.PLUGINS_BASE_DEFAULT }}"; fi
           PLUGIN_PATH="${PLUGIN_BASE}/${{ env.PLUGIN_SLUG }}"
+          echo "Deploying to: $PLUGIN_PATH"
+          case "$PLUGIN_PATH" in
+            */plugins|*/plugins/) echo "Refusing to deploy to plugins root. Check KINSTAPROD_PLUGINS_BASE"; exit 1;;
+          esac
           rsync -az --delete \
             -e "ssh -p ${{ secrets.KINSTAPROD_PORT }}" \
             --exclude ".git/" --exclude ".github/" --exclude ".gitignore" \
-            ./ "${{ secrets.KINSTAPROD_USER }}@${{ secrets.KINSTAPROD_HOST }}:${PLUGIN_PATH}"
+            ./ "${{ secrets.KINSTAPROD_USER }}@${{ secrets.KINSTAPROD_HOST }}:${PLUGIN_PATH}/"
 
       - name: Post-deploy (wp-cli)
         uses: appleboy/ssh-action@v1.0.3
