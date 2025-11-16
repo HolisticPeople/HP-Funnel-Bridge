@@ -72,8 +72,10 @@ class SettingsPage {
 				$name = isset($row['name']) ? sanitize_text_field((string)$row['name']) : '';
 				$origStg = isset($row['origin_staging']) ? trim((string)$row['origin_staging']) : '';
 				$origProd = isset($row['origin_production']) ? trim((string)$row['origin_production']) : '';
-				$modeStg = isset($row['mode_staging']) && in_array($row['mode_staging'], ['test','live','off'], true) ? $row['mode_staging'] : 'test';
-				$modeProd = isset($row['mode_production']) && in_array($row['mode_production'], ['test','live','off'], true) ? $row['mode_production'] : 'live';
+				$ms = isset($row['mode_staging']) ? strtolower(trim((string)$row['mode_staging'])) : '';
+				$mp = isset($row['mode_production']) ? strtolower(trim((string)$row['mode_production'])) : '';
+				$modeStg  = in_array($ms,  ['test','live','off'], true)  ? $ms : 'test';
+				$modeProd = in_array($mp,  ['test','live','off'], true)  ? $mp : 'live';
 				if ($id === '' || $name === '') { continue; }
 				$funnels[] = [
 					'id' => $id,
