@@ -214,17 +214,23 @@ class SettingsPage {
 				<th scope="row">Test signing secret</th>
 				<td>
 					<input type="text" name="hp_fb_settings[webhook_secret_test]" value="<?php echo esc_attr($test); ?>" size="60" autocomplete="off" />
-					<p class="description">From Stripe → Developers → Webhooks → your <em>staging</em> Bridge endpoint → “Reveal signing secret”.</p>
+					<p class="description">From Stripe → Developers → Webhooks → switch to <strong>Test mode</strong>, open your <em>staging</em> Bridge endpoint, then click “Reveal signing secret”.</p>
 				</td>
 			</tr>
 			<tr>
 				<th scope="row">Live signing secret</th>
 				<td>
 					<input type="text" name="hp_fb_settings[webhook_secret_live]" value="<?php echo esc_attr($live); ?>" size="60" autocomplete="off" />
-					<p class="description">From Stripe → Developers → Webhooks → your <em>production</em> Bridge endpoint → “Reveal signing secret”.</p>
+					<p class="description">From Stripe → Developers → Webhooks → switch to <strong>Live mode</strong>, open your <em>production</em> Bridge endpoint, then click “Reveal signing secret”.</p>
 				</td>
 			</tr>
 		</table>
+		<p class="description">
+			<strong>Note:</strong> Stripe keeps <em>separate</em> webhook endpoints and signing secrets for Test and Live modes.
+			If you periodically clone Production to Staging, store <strong>both</strong> secrets here so the Bridge can verify
+			events in either environment without breaking after a clone. The Bridge will accept a signature that matches
+			<em>either</em> secret.
+		</p>
 		<?php
 	}
 
