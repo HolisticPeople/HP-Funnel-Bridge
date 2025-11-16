@@ -19,6 +19,11 @@ class StatusController {
 	}
 
 	public function handle(WP_REST_Request $request) {
+		// Prevent caches from serving stale status
+		if (function_exists('nocache_headers')) { nocache_headers(); }
+		header('Cache-Control: no-store, no-cache, must-revalidate, max-age=0');
+		header('Pragma: no-cache');
+
 		$fid = (string) ($request->get_param('funnel_id') ?? '');
 		$opts = get_option('hp_fb_settings', []);
 		$env = 'unknown';
