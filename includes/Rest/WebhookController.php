@@ -135,6 +135,16 @@ class WebhookController {
 		}
 		$order->save();
 
+		// Update Stripe PI description to include Woo order number for backoffice clarity
+		if ($pi_id !== '') {
+			try {
+				$stripe = new \HP_FB\Stripe\Client();
+				$order_no = method_exists($order, 'get_order_number') ? (string) $order->get_order_number() : (string) $order->get_id();
+				$desc = 'HolisticPeople - ' . $funnel_name . ' - Order #' . $order_no;
+				$stripe->updatePaymentIntent($pi_id, ['description' => $desc]);
+			} catch (\Throwable $e) { /* ignore non-fatal */ }
+		}
+
 		// Remove draft
 		$store->delete($draft_id);
 

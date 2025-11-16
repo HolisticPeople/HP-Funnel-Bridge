@@ -110,6 +110,25 @@ class Client {
 		$data = json_decode(wp_remote_retrieve_body($resp), true);
 		return is_array($data) ? $data : null;
 	}
+
+	/**
+	 * Update a PaymentIntent with provided fields (e.g., description).
+	 *
+	 * @param string $piId
+	 * @param array  $fields
+	 * @return bool
+	 */
+	public function updatePaymentIntent(string $piId, array $fields): bool {
+		if ($piId === '' || empty($fields)) { return false; }
+		$resp = wp_remote_post('https://api.stripe.com/v1/payment_intents/' . rawurlencode($piId), [
+			'headers' => $this->headers(),
+			'body'    => $fields,
+			'timeout' => 25,
+		]);
+		if (is_wp_error($resp)) { return false; }
+		$code = (int) wp_remote_retrieve_response_code($resp);
+		return $code >= 200 && $code < 300;
+	}
 }
 
 
