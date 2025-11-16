@@ -22,6 +22,12 @@ class WebhookController {
 
 	public function handle(WP_REST_Request $request) {
 		$payload = $request->get_body();
+
+		// Optional signature verification (recommended in production)
+		if (!$this->verifyStripeSignatureIfConfigured($payload)) {
+			return new WP_REST_Response(['ok' => false, 'reason' => 'sig_verify_failed'], 400);
+		}
+
 		$event = json_decode($payload, true);
 		if (!is_array($event) || empty($event['type'])) {
 			return new WP_REST_Response(['ok' => false], 400);
@@ -149,6 +155,62 @@ class WebhookController {
 		$store->delete($draft_id);
 
 		return new WP_REST_Response(['ok' => true, 'order_id' => $order->get_id()]);
+	}
+
+	/**
+	 * If webhook signing secrets are configured, verify Stripe-Signature header.
+	 * Accepts either the test or live secret (so it works across modes).
+	 * Returns true if verification passes or if no secret is configured.
+	 */
+	private function verifyStripeSignatureIfConfigured(string $payload): bool {
+		$opts = get_option('hp_fb_settings', []);
+		$test = isset($opts['webhook_secret_test']) ? trim((string)$opts['webhook_secret_test']) : '';
+		$live = isset($opts['webhook_secret_live']) ? trim((string)$opts['webhook_secret_live']) : '';
+		// If neither secret is set, do not enforce verification (keeps staging flexible)
+		if ($test === '' && $live === '') {
+			return true;
+		}
+		$sigHeader = isset($_SERVER['HTTP_STRIPE_SIGNATURE']) ? (string)$_SERVER['HTTP_STRIPE_SIGNATURE'] : '';
+		if ($sigHeader === '') {
+			return false;
+		}
+		$secrets = array_filter([$test, $live], function($v){ return $v !== ''; });
+		foreach ($secrets as $secret) {
+			if ($this->verifyStripeSig($payload, $sigHeader, $secret)) {
+				return true;
+			}
+		}
+		return false;
+	}
+
+	/**
+	 * Verify Stripe v1 signature with tolerance (default 5 minutes).
+	 */
+	private function verifyStripeSig(string $payload, string $sigHeader, string $secret, int $tolerance = 300): bool {
+		$timestamp = null;
+		$signatures = [];
+		foreach (explode(',', $sigHeader) as $kv) {
+			$kv = trim($kv);
+			if ($kv === '') { continue; }
+			[$k, $v] = array_pad(explode('=', $kv, 2), 2, '');
+			if ($k === 't') { $timestamp = (int)$v; }
+			if ($k === 'v1') { $signatures[] = $v; }
+		}
+		if (!$timestamp || empty($signatures)) {
+			return false;
+		}
+		if (abs(time() - $timestamp) > $tolerance) {
+			// Too old/new
+			return false;
+		}
+		$signedPayload = $timestamp . '.' . $payload;
+		$expected = hash_hmac('sha256', $signedPayload, $secret);
+		foreach ($signatures as $sig) {
+			if (hash_equals($expected, $sig)) {
+				return true;
+			}
+		}
+		return false;
 	}
 
 	/**

@@ -24,12 +24,15 @@ class SettingsPage {
 				'allowed_origins' => [],
 				'funnel_registry' => [], // legacy: array of [id => name]
 				'funnels' => [], // new: array of [id, name, origin_staging, origin_production, mode_staging, mode_production]
+				'webhook_secret_test' => '',
+				'webhook_secret_live' => '',
 			],
 		]);
 		add_settings_section('hp_fb_main', 'General', '__return_false', 'hp-funnel-bridge');
 		// Removed global Environment selector; per-funnel modes are used instead.
 		add_settings_field('hp_fb_allowed_origins', 'Allowed Origins', [__CLASS__, 'fieldOrigins'], 'hp-funnel-bridge', 'hp_fb_main');
 		add_settings_field('hp_fb_registry', 'Funnel Registry', [__CLASS__, 'fieldRegistry'], 'hp-funnel-bridge', 'hp_fb_main');
+		add_settings_field('hp_fb_webhook_secrets', 'Stripe Webhook Signing Secrets', [__CLASS__, 'fieldWebhookSecrets'], 'hp-funnel-bridge', 'hp_fb_main');
 	}
 
 	public static function sanitize($value) {
@@ -83,6 +86,9 @@ class SettingsPage {
 			}
 		}
 		$out['funnels'] = $funnels;
+		// Webhook secrets (do not trim to avoid accidental spaces removal on paste? we will trim)
+		$out['webhook_secret_test'] = isset($value['webhook_secret_test']) ? trim((string)$value['webhook_secret_test']) : '';
+		$out['webhook_secret_live'] = isset($value['webhook_secret_live']) ? trim((string)$value['webhook_secret_live']) : '';
 		return $out;
 	}
 
@@ -195,6 +201,30 @@ class SettingsPage {
 			});
 		})();
 		</script>
+		<?php
+	}
+
+	public static function fieldWebhookSecrets(): void {
+		$opts = get_option('hp_fb_settings', []);
+		$test = isset($opts['webhook_secret_test']) ? (string)$opts['webhook_secret_test'] : '';
+		$live = isset($opts['webhook_secret_live']) ? (string)$opts['webhook_secret_live'] : '';
+		?>
+		<table class="form-table">
+			<tr>
+				<th scope="row">Test signing secret</th>
+				<td>
+					<input type="text" name="hp_fb_settings[webhook_secret_test]" value="<?php echo esc_attr($test); ?>" size="60" autocomplete="off" />
+					<p class="description">From Stripe → Developers → Webhooks → your <em>staging</em> Bridge endpoint → “Reveal signing secret”.</p>
+				</td>
+			</tr>
+			<tr>
+				<th scope="row">Live signing secret</th>
+				<td>
+					<input type="text" name="hp_fb_settings[webhook_secret_live]" value="<?php echo esc_attr($live); ?>" size="60" autocomplete="off" />
+					<p class="description">From Stripe → Developers → Webhooks → your <em>production</em> Bridge endpoint → “Reveal signing secret”.</p>
+				</td>
+			</tr>
+		</table>
 		<?php
 	}
 
