@@ -1,0 +1,154 @@
+name: Deploy HP Funnel Bridge to Kinsta
+
+on:
+  push:
+    branches:
+      - dev          # auto deploy to STAGING
+  workflow_dispatch:
+    inputs:
+      deploy:
+        description: "Which environment to deploy?"
+        required: true
+        type: choice
+        options:
+          - production
+          - staging
+        default: production
+
+concurrency:
+  group: deploy-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  PLUGIN_SLUG: hp-funnel-bridge
+  PLUGINS_BASE_DEFAULT: public/wp-content/plugins
+
+jobs:
+  deploy-staging:
+    if: |
+      github.ref_name == 'dev' ||
+      (github.event_name == 'workflow_dispatch' && inputs.deploy == 'staging')
+    name: Deploy to STAGING
+    runs-on: ubuntu-latest
+    environment: staging
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Load SSH key
+        uses: webfactory/ssh-agent@v0.9.0
+        with:
+          ssh-private-key: ${{ secrets.KINSTA_SSH_KEY }}
+
+      - name: Trust host key
+        run: |
+          mkdir -p ~/.ssh
+          ssh-keyscan -p "${{ secrets.KINSTA_PORT }}" "${{ secrets.KINSTA_HOST }}" >> ~/.ssh/known_hosts
+          chmod 600 ~/.ssh/known_hosts
+
+      - name: Ensure plugin dir exists
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host:     ${{ secrets.KINSTA_HOST }}
+          port:     ${{ secrets.KINSTA_PORT }}
+          username: ${{ secrets.KINSTA_USER }}
+          key:      ${{ secrets.KINSTA_SSH_KEY }}
+          script: |
+            PLUGIN_BASE="${{ secrets.KINSTA_PLUGINS_BASE }}"
+            if [ -z "$PLUGIN_BASE" ]; then PLUGIN_BASE="${{ env.PLUGINS_BASE_DEFAULT }}"; fi
+            mkdir -p "$PLUGIN_BASE/${{ env.PLUGIN_SLUG }}"
+
+      - name: Rsync plugin files
+        run: |
+          PLUGIN_BASE="${{ secrets.KINSTA_PLUGINS_BASE }}"
+          if [ -z "$PLUGIN_BASE" ]; then PLUGIN_BASE="${{ env.PLUGINS_BASE_DEFAULT }}"; fi
+          PLUGIN_PATH="${PLUGIN_BASE}/${{ env.PLUGIN_SLUG }}"
+          echo "Deploying to: $PLUGIN_PATH"
+          # Safety guard: refuse to run if target is the plugins root
+          case "$PLUGIN_PATH" in
+            */plugins|*/plugins/) echo "Refusing to deploy to plugins root. Check KINSTA_PLUGINS_BASE"; exit 1;;
+          esac
+          rsync -az --delete \
+            -e "ssh -p ${{ secrets.KINSTA_PORT }}" \
+            --exclude ".git/" --exclude ".github/" --exclude ".gitignore" \
+            ./ "${{ secrets.KINSTA_USER }}@${{ secrets.KINSTA_HOST }}:${PLUGIN_PATH}/"
+
+      - name: Post-deploy (wp-cli)
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host:     ${{ secrets.KINSTA_HOST }}
+          port:     ${{ secrets.KINSTA_PORT }}
+          username: ${{ secrets.KINSTA_USER }}
+          key:      ${{ secrets.KINSTA_SSH_KEY }}
+          script: |
+            PLUGIN_BASE="${{ secrets.KINSTA_PLUGINS_BASE }}"
+            if [ -z "$PLUGIN_BASE" ]; then PLUGIN_BASE="${{ env.PLUGINS_BASE_DEFAULT }}"; fi
+            PLUGIN_PATH="$PLUGIN_BASE/${{ env.PLUGIN_SLUG }}"
+            WP_PATH="$(dirname \"$(dirname \"$PLUGIN_PATH\")\")"
+            wp --path="$WP_PATH" cache flush || true
+            wp --path="$WP_PATH" plugin activate hp-funnel-bridge || true
+
+  deploy-production:
+    if: github.event_name == 'workflow_dispatch' && inputs.deploy == 'production'
+    name: Deploy to PRODUCTION
+    runs-on: ubuntu-latest
+    environment: production
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Load SSH key
+        uses: webfactory/ssh-agent@v0.9.0
+        with:
+          ssh-private-key: ${{ secrets.KINSTAPROD_SSH_KEY }}
+
+      - name: Trust host key (production)
+        run: |
+          mkdir -p ~/.ssh
+          ssh-keyscan -p "${{ secrets.KINSTAPROD_PORT }}" "${{ secrets.KINSTAPROD_HOST }}" >> ~/.ssh/known_hosts
+          chmod 600 ~/.ssh/known_hosts
+
+      - name: Ensure plugin dir exists
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host:     ${{ secrets.KINSTAPROD_HOST }}
+          port:     ${{ secrets.KINSTAPROD_PORT }}
+          username: ${{ secrets.KINSTAPROD_USER }}
+          key:      ${{ secrets.KINSTAPROD_SSH_KEY }}
+          script: |
+            PLUGIN_BASE="${{ secrets.KINSTAPROD_PLUGINS_BASE }}"
+            if [ -z "$PLUGIN_BASE" ]; then PLUGIN_BASE="${{ env.PLUGINS_BASE_DEFAULT }}"; fi
+            mkdir -p "$PLUGIN_BASE/${{ env.PLUGIN_SLUG }}"
+
+      - name: Rsync plugin files
+        run: |
+          PLUGIN_BASE="${{ secrets.KINSTAPROD_PLUGINS_BASE }}"
+          if [ -z "$PLUGIN_BASE" ]; then PLUGIN_BASE="${{ env.PLUGINS_BASE_DEFAULT }}"; fi
+          PLUGIN_PATH="${PLUGIN_BASE}/${{ env.PLUGIN_SLUG }}"
+          echo "Deploying to: $PLUGIN_PATH"
+          case "$PLUGIN_PATH" in
+            */plugins|*/plugins/) echo "Refusing to deploy to plugins root. Check KINSTAPROD_PLUGINS_BASE"; exit 1;;
+          esac
+          rsync -az --delete \
+            -e "ssh -p ${{ secrets.KINSTAPROD_PORT }}" \
+            --exclude ".git/" --exclude ".github/" --exclude ".gitignore" \
+            ./ "${{ secrets.KINSTAPROD_USER }}@${{ secrets.KINSTAPROD_HOST }}:${PLUGIN_PATH}/"
+
+      - name: Post-deploy (wp-cli)
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host:     ${{ secrets.KINSTAPROD_HOST }}
+          port:     ${{ secrets.KINSTAPROD_PORT }}
+          username: ${{ secrets.KINSTAPROD_USER }}
+          key:      ${{ secrets.KINSTAPROD_SSH_KEY }}
+          script: |
+            PLUGIN_BASE="${{ secrets.KINSTAPROD_PLUGINS_BASE }}"
+            if [ -z "$PLUGIN_BASE" ]; then PLUGIN_BASE="${{ env.PLUGINS_BASE_DEFAULT }}"; fi
+            PLUGIN_PATH="$PLUGIN_BASE/${{ env.PLUGIN_SLUG }}"
+            WP_PATH="$(dirname \"$(dirname \"$PLUGIN_PATH\")\")"
+            wp --path="$WP_PATH" cache flush || true
+            wp --path="$WP_PATH" plugin activate hp-funnel-bridge || true
+
+
