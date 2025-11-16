@@ -134,13 +134,15 @@ class SettingsPage {
 					'name' => (string)($f['name'] ?? ''),
 					'origin_staging' => (string)($f['origin_staging'] ?? ''),
 					'origin_production' => (string)($f['origin_production'] ?? ''),
+					'mode_staging' => (string)($f['mode_staging'] ?? 'test'),
+					'mode_production' => (string)($f['mode_production'] ?? 'live'),
 				];
 			}
 		} else {
 			// Back-compat: transform legacy registry to editable rows
 			$reg = isset($opts['funnel_registry']) && is_array($opts['funnel_registry']) ? $opts['funnel_registry'] : [];
 			foreach ($reg as $id => $name) {
-				$rows[] = ['id' => (string)$id, 'name' => (string)$name, 'origin_staging' => '', 'origin_production' => ''];
+				$rows[] = ['id' => (string)$id, 'name' => (string)$name, 'origin_staging' => '', 'origin_production' => '', 'mode_staging' => 'test', 'mode_production' => 'live'];
 			}
 		}
 		// Add one empty row for quick additions
@@ -160,7 +162,7 @@ class SettingsPage {
 						<td><input type="text" name="hp_fb_settings[funnels][<?php echo esc_attr((string)$i); ?>][name]" value="<?php echo esc_attr($r['name']); ?>" /></td>
 						<td><input type="text" name="hp_fb_settings[funnels][<?php echo esc_attr((string)$i); ?>][origin_staging]" value="<?php echo esc_attr($r['origin_staging']); ?>" placeholder="https://staging.example.com" /></td>
 						<td>
-							<select name="hp_fb_settings[funnels][<?php echo esc_attr((string)$i); ?>][mode_staging]">
+							<select name="hp_fb_settings[funnels][<?php echo esc_attr((string)$i); ?>][mode_staging]" data-current="<?php echo esc_attr($r['mode_staging'] ?? 'test'); ?>">
 								<option value="test" <?php selected(($r['mode_staging'] ?? 'test'), 'test'); ?>>Test</option>
 								<option value="live" <?php selected(($r['mode_staging'] ?? 'test'), 'live'); ?>>Live</option>
 								<option value="off"  <?php selected(($r['mode_staging'] ?? 'test'), 'off');  ?>>Off</option>
@@ -168,7 +170,7 @@ class SettingsPage {
 						</td>
 						<td><input type="text" name="hp_fb_settings[funnels][<?php echo esc_attr((string)$i); ?>][origin_production]" value="<?php echo esc_attr($r['origin_production']); ?>" placeholder="https://www.example.com" /></td>
 						<td>
-							<select name="hp_fb_settings[funnels][<?php echo esc_attr((string)$i); ?>][mode_production]">
+							<select name="hp_fb_settings[funnels][<?php echo esc_attr((string)$i); ?>][mode_production]" data-current="<?php echo esc_attr($r['mode_production'] ?? 'live'); ?>">
 								<option value="live" <?php selected(($r['mode_production'] ?? 'live'), 'live'); ?>>Live</option>
 								<option value="test" <?php selected(($r['mode_production'] ?? 'live'), 'test'); ?>>Test</option>
 								<option value="off"  <?php selected(($r['mode_production'] ?? 'live'), 'off');  ?>>Off</option>
@@ -191,9 +193,9 @@ class SettingsPage {
 					'<td><input type="text" name="hp_fb_settings[funnels]['+i+'][id]" value="" /></td>' +
 					'<td><input type="text" name="hp_fb_settings[funnels]['+i+'][name]" value="" /></td>' +
 					'<td><input type="text" name="hp_fb_settings[funnels]['+i+'][origin_staging]" value="" placeholder="https://staging.example.com" /></td>' +
-					'<td><select name="hp_fb_settings[funnels]['+i+'][mode_staging]"><option value="test" selected>Test</option><option value="live">Live</option></select></td>' +
+					'<td><select name="hp_fb_settings[funnels]['+i+'][mode_staging]"><option value="test" selected>Test</option><option value="live">Live</option><option value="off">Off</option></select></td>' +
 					'<td><input type="text" name="hp_fb_settings[funnels]['+i+'][origin_production]" value="" placeholder="https://www.example.com" /></td>' +
-					'<td><select name="hp_fb_settings[funnels]['+i+'][mode_production]"><option value="live" selected>Live</option><option value="test">Test</option></select></td>' +
+					'<td><select name="hp_fb_settings[funnels]['+i+'][mode_production]"><option value="live" selected>Live</option><option value="test">Test</option><option value="off">Off</option></select></td>' +
 					'<td><button type="button" class="button button-secondary hp-fb-del-row">Delete</button></td>' +
 				'</tr>';
 			}
@@ -202,6 +204,13 @@ class SettingsPage {
 				if (e.target && e.target.classList.contains('hp-fb-del-row')) {
 					const tr = e.target.closest('tr'); if (tr) tr.remove();
 				}
+			});
+			// Ensure selects reflect saved values even if other admin scripts alter them
+			document.addEventListener('DOMContentLoaded', function(){
+				tbody.querySelectorAll('select[name$="[mode_staging]"], select[name$="[mode_production]"]').forEach(function(sel){
+					var cur = sel.getAttribute('data-current');
+					if (cur) { sel.value = cur; }
+				});
 			});
 		})();
 		</script>
