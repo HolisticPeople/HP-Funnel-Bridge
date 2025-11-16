@@ -108,6 +108,7 @@ add_action('rest_api_init', function () {
 	(new \HP_FB\Rest\CheckoutController())->register_routes();
 	(new \HP_FB\Rest\UpsellController())->register_routes();
 	(new \HP_FB\Rest\WebhookController())->register_routes();
+	(new \HP_FB\Rest\StatusController())->register_routes();
 });
 
 // Register lightweight hosted confirmation page: /hp-funnel-confirm?cs=CLIENT_SECRET

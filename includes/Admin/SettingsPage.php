@@ -72,8 +72,8 @@ class SettingsPage {
 				$name = isset($row['name']) ? sanitize_text_field((string)$row['name']) : '';
 				$origStg = isset($row['origin_staging']) ? trim((string)$row['origin_staging']) : '';
 				$origProd = isset($row['origin_production']) ? trim((string)$row['origin_production']) : '';
-				$modeStg = isset($row['mode_staging']) && in_array($row['mode_staging'], ['test','live'], true) ? $row['mode_staging'] : 'test';
-				$modeProd = isset($row['mode_production']) && in_array($row['mode_production'], ['test','live'], true) ? $row['mode_production'] : 'live';
+				$modeStg = isset($row['mode_staging']) && in_array($row['mode_staging'], ['test','live','off'], true) ? $row['mode_staging'] : 'test';
+				$modeProd = isset($row['mode_production']) && in_array($row['mode_production'], ['test','live','off'], true) ? $row['mode_production'] : 'live';
 				if ($id === '' || $name === '') { continue; }
 				$funnels[] = [
 					'id' => $id,
@@ -161,6 +161,7 @@ class SettingsPage {
 							<select name="hp_fb_settings[funnels][<?php echo esc_attr((string)$i); ?>][mode_staging]">
 								<option value="test" <?php selected(($r['mode_staging'] ?? 'test'), 'test'); ?>>Test</option>
 								<option value="live" <?php selected(($r['mode_staging'] ?? 'test'), 'live'); ?>>Live</option>
+								<option value="off"  <?php selected(($r['mode_staging'] ?? 'test'), 'off');  ?>>Off</option>
 							</select>
 						</td>
 						<td><input type="text" name="hp_fb_settings[funnels][<?php echo esc_attr((string)$i); ?>][origin_production]" value="<?php echo esc_attr($r['origin_production']); ?>" placeholder="https://www.example.com" /></td>
@@ -168,6 +169,7 @@ class SettingsPage {
 							<select name="hp_fb_settings[funnels][<?php echo esc_attr((string)$i); ?>][mode_production]">
 								<option value="live" <?php selected(($r['mode_production'] ?? 'live'), 'live'); ?>>Live</option>
 								<option value="test" <?php selected(($r['mode_production'] ?? 'live'), 'test'); ?>>Test</option>
+								<option value="off"  <?php selected(($r['mode_production'] ?? 'live'), 'off');  ?>>Off</option>
 							</select>
 						</td>
 						<td><button type="button" class="button button-secondary hp-fb-del-row">Delete</button></td>

@@ -45,6 +45,16 @@ class CheckoutController {
 				}
 			}
 		}
+		// If funnel is switched off in this environment, instruct caller to redirect away
+		if ($modeOverride === 'off') {
+			$redirect = home_url('/');
+			return new WP_Error(
+				'funnel_off',
+				'Funnel is temporarily disabled for this environment.',
+				['status' => 409, 'redirect' => $redirect]
+			);
+		}
+
 		$stripe = new StripeClient(($modeOverride === 'test' || $modeOverride === 'live') ? $modeOverride : null);
 		if (!$stripe->isConfigured()) {
 			return new WP_Error('stripe_not_configured', 'Stripe keys are missing in EAO settings', ['status' => 500]);
