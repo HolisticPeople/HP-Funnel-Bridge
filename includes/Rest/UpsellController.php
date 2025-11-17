@@ -35,6 +35,7 @@ class UpsellController {
 		}
 		// Amount
 		$amount = 0.0;
+		$added_items = 0;
 		foreach ($items as $it) {
 			$product_id = isset($it['product_id']) ? (int)$it['product_id'] : 0;
 			$variation_id = isset($it['variation_id']) ? (int)$it['variation_id'] : 0;
@@ -43,6 +44,7 @@ class UpsellController {
 			$product = wc_get_product($variation_id > 0 ? $variation_id : $product_id);
 			if (!$product) { continue; }
 			$amount += (float)$product->get_price() * $qty;
+			$added_items++;
 		}
 		$override = $request->get_param('amount_override');
 		if (is_numeric($override) && (float)$override > 0) {
@@ -89,6 +91,14 @@ class UpsellController {
 			$item->set_subtotal($product->get_price() * $qty);
 			$item->set_total($product->get_price() * $qty);
 			$child->add_item($item);
+		}
+		// If no product items were provided, record the upsell as a fee line so totals match.
+		if ($added_items === 0) {
+			$label = (string) ($request->get_param('fee_label') ?? 'Off The Fast Kit');
+			$fee = new \WC_Order_Item_Fee();
+			$fee->set_name($label);
+			$fee->set_total($amount);
+			$child->add_item($fee);
 		}
 		// Copy addresses from parent
 		$this->copyAddress($parent, $child, 'billing');
