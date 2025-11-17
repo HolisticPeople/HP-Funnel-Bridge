@@ -117,11 +117,13 @@ class WebhookController {
 			$order->update_meta_data('_hp_fb_stripe_customer_id', (string)$draft['stripe_customer']);
 		}
 
-		// Set gateway so refunds work in Woo admin
+		// Set gateway and make mode explicit in title (Live/Test)
+		$modeLabel = (!empty($pi['livemode'])) ? 'Live' : 'Test';
+		$pmTitle = 'HP Funnel Bridge (Stripe - ' . $modeLabel . ')';
 		if (method_exists($order, 'set_payment_method')) { $order->set_payment_method('hp_fb_stripe'); }
-		if (method_exists($order, 'set_payment_method_title')) { $order->set_payment_method_title('HP Funnel Bridge (Stripe)'); }
+		if (method_exists($order, 'set_payment_method_title')) { $order->set_payment_method_title($pmTitle); }
 		$order->update_meta_data('_payment_method', 'hp_fb_stripe');
-		$order->update_meta_data('_payment_method_title', 'HP Funnel Bridge (Stripe)');
+		$order->update_meta_data('_payment_method_title', $pmTitle);
 
 		// Funnel note and analytics
 		$funnel_name = isset($draft['funnel_name']) ? (string)$draft['funnel_name'] : 'Funnel';
@@ -141,13 +143,16 @@ class WebhookController {
 		}
 		$order->save();
 
-		// Update Stripe PI description to include Woo order number for backoffice clarity
+		// Update Stripe PI + Charge description to include Woo order number for backoffice clarity
 		if ($pi_id !== '') {
 			try {
 				$stripe = new \HP_FB\Stripe\Client();
 				$order_no = method_exists($order, 'get_order_number') ? (string) $order->get_order_number() : (string) $order->get_id();
 				$desc = 'HolisticPeople - ' . $funnel_name . ' - Order #' . $order_no;
 				$stripe->updatePaymentIntent($pi_id, ['description' => $desc]);
+				if ($charge_id !== '') {
+					$stripe->updateCharge($charge_id, ['description' => $desc]);
+				}
 			} catch (\Throwable $e) { /* ignore non-fatal */ }
 		}
 

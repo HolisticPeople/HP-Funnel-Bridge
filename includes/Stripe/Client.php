@@ -129,6 +129,21 @@ class Client {
 		$code = (int) wp_remote_retrieve_response_code($resp);
 		return $code >= 200 && $code < 300;
 	}
+
+	/**
+	 * Update a Charge (e.g., to set description/metadata).
+	 */
+	public function updateCharge(string $chargeId, array $fields): bool {
+		if ($chargeId === '' || empty($fields)) { return false; }
+		$resp = wp_remote_post('https://api.stripe.com/v1/charges/' . rawurlencode($chargeId), [
+			'headers' => $this->headers(),
+			'body'    => $fields,
+			'timeout' => 25,
+		]);
+		if (is_wp_error($resp)) { return false; }
+		$code = (int) wp_remote_retrieve_response_code($resp);
+		return $code >= 200 && $code < 300;
+	}
 }
 
 
