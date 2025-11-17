@@ -91,7 +91,6 @@ class StripeGateway extends \WC_Payment_Gateway {
 				number_format($amount, 2),
 				(string) $data['id']
 			));
-			$order->update_status('refunded');
 			return true;
 		}
 

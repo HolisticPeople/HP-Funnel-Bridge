@@ -2,7 +2,7 @@
 /**
  * Plugin Name:       HP Funnel Bridge
  * Description:       Multi‑funnel bridge exposing REST endpoints for checkout, shipping rates, totals, and one‑click upsells. Reuses EAO (Stripe keys, ShipStation, YITH points) without modifying it.
- * Version:           0.2.12
+ * Version:           0.2.23
  * Requires at least: 6.0
  * Requires PHP:      7.4
  * Author:            Holistic People
@@ -15,7 +15,7 @@ if (!defined('ABSPATH')) {
 	exit;
 }
 
-define('HP_FB_PLUGIN_VERSION', '0.2.12');
+define('HP_FB_PLUGIN_VERSION', '0.2.23');
 define('HP_FB_PLUGIN_FILE', __FILE__);
 define('HP_FB_PLUGIN_DIR', plugin_dir_path(__FILE__));
 define('HP_FB_PLUGIN_URL', plugin_dir_url(__FILE__));
@@ -59,6 +59,49 @@ if (is_admin()) {
 		}
 	});
 }
+
+// Ensure EAO refund compatibility is registered early for admin-ajax requests too
+add_action('plugins_loaded', function () {
+	if (is_admin() && class_exists('\HP_FB\Admin\EAORefundCompat')) {
+		(new \HP_FB\Admin\EAORefundCompat())->register();
+	}
+}, 1);
+
+// Guard admin-ajax JSON for EAO refunds against noisy output from other plugins (open_basedir warnings etc.)
+// Clean noisy output (warnings) from other plugins for EAO refund AJAX endpoints so JSON stays valid
+if (!function_exists('hp_fb_json_sanitize_buffer')) {
+	function hp_fb_json_sanitize_buffer($buffer) {
+		// Keep only the first JSON object/array in the buffer
+		$posObj = strpos($buffer, '{');
+		$posArr = strpos($buffer, '[');
+		$start = false;
+		if ($posObj !== false && $posArr !== false) { $start = min($posObj, $posArr); }
+		elseif ($posObj !== false) { $start = $posObj; }
+		elseif ($posArr !== false) { $start = $posArr; }
+		if ($start === false) { return $buffer; }
+		$trimmed = substr($buffer, $start);
+		$endObj = strrpos($trimmed, '}');
+		$endArr = strrpos($trimmed, ']');
+		$end = false;
+		if ($endObj !== false && $endArr !== false) { $end = max($endObj, $endArr); }
+		elseif ($endObj !== false) { $end = $endObj; }
+		elseif ($endArr !== false) { $end = $endArr; }
+		if ($end !== false) {
+			$trimmed = substr($trimmed, 0, $end + 1);
+		}
+		return $trimmed;
+	}
+}
+add_action('init', function () {
+	if (!defined('DOING_AJAX') || !DOING_AJAX) { return; }
+	$action = isset($_REQUEST['action']) ? (string) $_REQUEST['action'] : '';
+	if ($action === 'eao_payment_get_refund_data' || $action === 'eao_payment_process_refund') {
+		// Reduce chance of warnings being printed
+		if (function_exists('ini_set')) { @ini_set('display_errors', '0'); }
+		// Start buffer with sanitizer
+		if (function_exists('ob_start')) { @ob_start('hp_fb_json_sanitize_buffer'); }
+	}
+}, 0);
 
 // CORS for our REST routes only
 add_action('rest_api_init', function () {
@@ -134,16 +177,20 @@ add_action('template_redirect', function () {
 		echo '<!doctype html><meta charset="utf-8"><title>Stripe not configured</title><p>Stripe keys are missing.</p>';
 		exit;
 	}
-	$pub = esc_js($stripe->publishable);
+	// Allow frontend to hint the publishable key via ?pk=... so we pick the correct Stripe environment
+	$pk_hint = isset($_GET['pk']) ? (string) $_GET['pk'] : '';
+	$pubVal = $pk_hint !== '' ? $pk_hint : $stripe->publishable;
+	$pub = esc_js($pubVal);
 	$cs_js = esc_js($cs);
 	// Build a valid absolute return URL for Stripe (must be https)
 	$here = esc_url(home_url('/'));
-	$isTest = $stripe->mode === 'test';
+	// Determine badge purely from publishable key; do not rely on global env
+	$isTest = (strpos($pubVal, '_test_') !== false);
 	echo '<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>HP Funnel Payment</title><style>body{font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;margin:24px;}#checkout{max-width:520px;margin:0 auto;}button{padding:10px 14px;border:1px solid #ccc;border-radius:6px;background:#111;color:#fff;cursor:pointer;}#messages{margin-top:12px;color:#c00}#amount{margin:6px 0 14px;color:#111;font-weight:600}.badge{display:inline-block;padding:2px 6px;border-radius:4px;font-size:12px;margin-left:8px}.test{background:#eef7ff;color:#0a66c2}.hint{font-size:13px;color:#333;background:#fafafa;border:1px solid #eee;border-radius:6px;padding:8px 10px;margin:8px 0}.hint code{background:#f2f2f2;padding:1px 4px;border-radius:3px}.copy{margin-left:8px;padding:3px 6px;border:1px solid #333;background:#333;color:#fff;border-radius:4px;cursor:pointer;font-size:12px}</style><script src="https://js.stripe.com/v3/"></script></head><body><div id="checkout"><h2>Complete Payment'.($isTest?'<span class="badge test" id="testbadge">Stripe Test Mode</span>':'').'</h2><div id="amount"></div>';
 	if ($isTest) {
 		echo '<div class="hint">Use Stripe test values: <br/>Card <code id="tcard">4242 4242 4242 4242</code><button class="copy" data-copy="#tcard">Copy</button> &nbsp; Exp <code id="texp">12/34</code><button class="copy" data-copy="#texp">Copy</button> &nbsp; CVC <code id="tcvc">123</code><button class="copy" data-copy="#tcvc">Copy</button></div>';
 	}
-	$pub_json = wp_json_encode($stripe->publishable);
+	$pub_json = wp_json_encode($pubVal);
 	$cs_json = wp_json_encode($cs);
 	$here_json = wp_json_encode($here);
 	echo '<div id="element"></div><div style="margin-top:12px;"><button id="pay" disabled>Pay</button></div><div id="messages"></div></div><script>(async function(){try{var pub='.$pub_json.';var cs='.$cs_json.';var ret='.$here_json.';var stripe=Stripe(pub);var elements=stripe.elements({clientSecret:cs});var paymentElement;try{paymentElement=elements.create("payment");paymentElement.mount("#element");}catch(pe){var m=document.getElementById("messages");if(m)m.textContent=(pe&&pe.message)?pe.message:"Failed to load payment fields";return;}var btn=document.getElementById("pay");var msg=document.getElementById("messages");var amt=document.getElementById("amount");function bindCopy(){var nodes=document.querySelectorAll(".copy");nodes.forEach(function(n){n.addEventListener("click",function(){var sel=n.getAttribute("data-copy");var el=document.querySelector(sel);if(!el) return;var txt=el.textContent||"";if(navigator.clipboard&&navigator.clipboard.writeText){navigator.clipboard.writeText(txt);}else{var ta=document.createElement("textarea");ta.value=txt;document.body.appendChild(ta);ta.select();try{document.execCommand("copy");}catch(e){}document.body.removeChild(ta);}});});}bindCopy();try{var pi=await stripe.retrievePaymentIntent(cs);if(pi&&pi.paymentIntent){var cents=pi.paymentIntent.amount||0;var cur=(pi.paymentIntent.currency||"usd").toUpperCase();amt.textContent="Amount: $"+(cents/100).toFixed(2)+" "+cur;}}catch(e){}paymentElement.on("change",function(e){btn.disabled=!e.complete;msg.textContent="";});btn.addEventListener("click",async function(){btn.disabled=true;msg.textContent="Processing...";try{var submitRes=await elements.submit();if(submitRes&&submitRes.error){msg.textContent=submitRes.error.message||"Please check your details";btn.disabled=false;return;}var res=await stripe.confirmPayment({elements:elements,clientSecret:cs,confirmParams:{return_url:ret},redirect:"if_required"});if(res.error){msg.textContent=(res.error&&res.error.message)?res.error.message:"Payment failed";btn.disabled=false;}else{msg.textContent="Payment processed. You can close this page.";btn.disabled=true;}}catch(err){msg.textContent=(err&&err.message)?err.message:"Payment failed";btn.disabled=false;}});}catch(_err){var m=document.getElementById("messages");if(m)m.textContent="Failed to initialize payment";}})();</script></body></html>';
