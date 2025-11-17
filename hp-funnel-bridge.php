@@ -2,7 +2,7 @@
 /**
  * Plugin Name:       HP Funnel Bridge
  * Description:       Multi‑funnel bridge exposing REST endpoints for checkout, shipping rates, totals, and one‑click upsells. Reuses EAO (Stripe keys, ShipStation, YITH points) without modifying it.
- * Version:           0.2.20
+ * Version:           0.2.21
  * Requires at least: 6.0
  * Requires PHP:      7.4
  * Author:            Holistic People
@@ -15,7 +15,7 @@ if (!defined('ABSPATH')) {
 	exit;
 }
 
-define('HP_FB_PLUGIN_VERSION', '0.2.20');
+define('HP_FB_PLUGIN_VERSION', '0.2.21');
 define('HP_FB_PLUGIN_FILE', __FILE__);
 define('HP_FB_PLUGIN_DIR', plugin_dir_path(__FILE__));
 define('HP_FB_PLUGIN_URL', plugin_dir_url(__FILE__));
@@ -66,6 +66,17 @@ add_action('plugins_loaded', function () {
 		(new \HP_FB\Admin\EAORefundCompat())->register();
 	}
 }, 1);
+
+// Guard admin-ajax JSON for EAO refunds against noisy output from other plugins (open_basedir warnings etc.)
+add_action('init', function () {
+	if (defined('DOING_AJAX') && DOING_AJAX) {
+		$action = isset($_REQUEST['action']) ? (string) $_REQUEST['action'] : '';
+		if ($action === 'eao_payment_get_refund_data') {
+			// Start an output buffer as early as possible; our handler will clean buffers before sending JSON
+			if (function_exists('ob_start')) { @ob_start(); }
+		}
+	}
+}, 0);
 
 // CORS for our REST routes only
 add_action('rest_api_init', function () {
