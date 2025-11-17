@@ -145,9 +145,30 @@ class WebhookController {
 		if (!empty($draft['stripe_customer'])) {
 			$order->update_meta_data('_hp_fb_stripe_customer_id', (string)$draft['stripe_customer']);
 		}
+		// Mirror EAO Stripe meta so EAO refund UI behaves like native charges
+		$livemode = !empty($pi['livemode']);
+		$eao_mode = $livemode ? 'live' : 'test';
+		if ($pi_id !== '') { $order->update_meta_data('_eao_stripe_payment_intent_id', $pi_id); }
+		if ($charge_id !== '') { $order->update_meta_data('_eao_stripe_charge_id', $charge_id); }
+		$order->update_meta_data('_eao_stripe_payment_mode', $eao_mode);
+		// Store last charged amount/currency (cents) for proportional refunds
+		$amount_cents = 0;
+		if (isset($pi['amount_received']) && is_numeric($pi['amount_received'])) {
+			$amount_cents = (int) $pi['amount_received'];
+		} elseif (isset($pi['amount']) && is_numeric($pi['amount'])) {
+			$amount_cents = (int) $pi['amount'];
+		}
+		if ($amount_cents > 0) {
+			$order->update_meta_data('_eao_last_charged_amount_cents', $amount_cents);
+		}
+		$currency = isset($pi['currency']) ? strtoupper((string) $pi['currency']) : '';
+		if ($currency !== '') {
+			$order->update_meta_data('_eao_last_charged_currency', $currency);
+		}
+		$order->update_meta_data('_eao_payment_gateway', $livemode ? 'stripe_live' : 'stripe_test');
 
 		// Set gateway and make mode explicit in title (Live/Test)
-		$modeLabel = (!empty($pi['livemode'])) ? 'Live' : 'Test';
+		$modeLabel = ($livemode) ? 'Live' : 'Test';
 		$pmTitle = 'HP Funnel Bridge (Stripe - ' . $modeLabel . ')';
 		if (method_exists($order, 'set_payment_method')) { $order->set_payment_method('hp_fb_stripe'); }
 		if (method_exists($order, 'set_payment_method_title')) { $order->set_payment_method_title($pmTitle); }
