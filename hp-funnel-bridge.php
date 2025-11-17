@@ -141,7 +141,8 @@ add_action('template_redirect', function () {
 	$cs_js = esc_js($cs);
 	// Build a valid absolute return URL for Stripe (must be https)
 	$here = esc_url(home_url('/'));
-	$isTest = (strpos($pubVal, '_test_') !== false) ? true : ($stripe->mode === 'test');
+	// Determine badge purely from publishable key; do not rely on global env
+	$isTest = (strpos($pubVal, '_test_') !== false);
 	echo '<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>HP Funnel Payment</title><style>body{font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;margin:24px;}#checkout{max-width:520px;margin:0 auto;}button{padding:10px 14px;border:1px solid #ccc;border-radius:6px;background:#111;color:#fff;cursor:pointer;}#messages{margin-top:12px;color:#c00}#amount{margin:6px 0 14px;color:#111;font-weight:600}.badge{display:inline-block;padding:2px 6px;border-radius:4px;font-size:12px;margin-left:8px}.test{background:#eef7ff;color:#0a66c2}.hint{font-size:13px;color:#333;background:#fafafa;border:1px solid #eee;border-radius:6px;padding:8px 10px;margin:8px 0}.hint code{background:#f2f2f2;padding:1px 4px;border-radius:3px}.copy{margin-left:8px;padding:3px 6px;border:1px solid #333;background:#333;color:#fff;border-radius:4px;cursor:pointer;font-size:12px}</style><script src="https://js.stripe.com/v3/"></script></head><body><div id="checkout"><h2>Complete Payment'.($isTest?'<span class="badge test" id="testbadge">Stripe Test Mode</span>':'').'</h2><div id="amount"></div>';
 	if ($isTest) {
 		echo '<div class="hint">Use Stripe test values: <br/>Card <code id="tcard">4242 4242 4242 4242</code><button class="copy" data-copy="#tcard">Copy</button> &nbsp; Exp <code id="texp">12/34</code><button class="copy" data-copy="#texp">Copy</button> &nbsp; CVC <code id="tcvc">123</code><button class="copy" data-copy="#tcvc">Copy</button></div>';
