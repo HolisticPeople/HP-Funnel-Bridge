@@ -14,14 +14,29 @@ class EAORefundCompat {
 		if (!is_admin()) { return; }
 		// Run before EAO's own handler; we only handle Bridge orders.
 		add_action('wp_ajax_eao_payment_get_refund_data', [$this, 'maybeHandleRefundData'], 1);
+		// Small console hint on EAO order editor pages
+		add_action('admin_enqueue_scripts', function() {
+			if (!isset($_GET['page']) || (string)$_GET['page'] !== 'eao_custom_order_editor_page') { return; }
+			$order_id = isset($_GET['order_id']) ? (int) $_GET['order_id'] : 0;
+			if (!$order_id) { return; }
+			$msg = sprintf('HP-FB: EAO refund compat active for order #%d', $order_id);
+			wp_add_inline_script('jquery-core', 'console.info('.wp_json_encode($msg).');', 'after');
+		});
 	}
 
 	public function maybeHandleRefundData(): void {
+		$logger = function_exists('wc_get_logger') ? \wc_get_logger() : null;
 		// Basic guards and order resolution
 		$order_id = isset($_POST['order_id']) ? absint($_POST['order_id']) : 0;
-		if (!$order_id) { return; }
+		if (!$order_id) {
+			if ($logger) { $logger->warning('EAORefundCompat: missing order_id', ['source' => 'hp-funnel-bridge']); }
+			return;
+		}
 		$order = wc_get_order($order_id);
-		if (!$order) { return; }
+		if (!$order) {
+			if ($logger) { $logger->warning('EAORefundCompat: order not found', ['source' => 'hp-funnel-bridge', 'order_id' => $order_id]); }
+			return;
+		}
 
 		// Only take over for Bridge-created Stripe orders
 		$is_bridge = (
@@ -29,7 +44,11 @@ class EAORefundCompat {
 			(string) $order->get_meta('_hp_fb_stripe_charge_id', true) !== '' ||
 			(string) $order->get_payment_method() === 'hp_fb_stripe'
 		);
-		if (!$is_bridge) { return; }
+		if (!$is_bridge) {
+			if ($logger) { $logger->info('EAORefundCompat: non-bridge order, letting EAO handle', ['source' => 'hp-funnel-bridge', 'order_id' => $order_id]); }
+			return;
+		}
+		if ($logger) { $logger->info('EAORefundCompat: handling refund data', ['source' => 'hp-funnel-bridge', 'order_id' => $order_id]); }
 
 		$items_resp = [];
 
@@ -176,10 +195,24 @@ class EAORefundCompat {
 			$gateway_info = array('label' => 'Stripe (EAO ' . $mode . ')');
 		}
 
+		if ($logger) {
+			$logger->info('EAORefundCompat: responding with items', [
+				'source' => 'hp-funnel-bridge',
+				'order_id' => $order_id,
+				'items' => count($order_items),
+				'shipping_items' => count($order->get_items('shipping'))
+			]);
+		}
+
 		wp_send_json_success(array(
+			'hp_fb_refund_compat' => true,
 			'items' => $items_resp,
 			'refunds' => $existing,
-			'gateway' => $gateway_info
+			'gateway' => $gateway_info,
+			'debug' => array(
+				'items' => count($order_items),
+				'shipping_items' => count($order->get_items('shipping'))
+			)
 		));
 	}
 }
