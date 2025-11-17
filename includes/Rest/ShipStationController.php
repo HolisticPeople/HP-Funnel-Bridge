@@ -97,6 +97,21 @@ class ShipStationController {
 				$fmt = \eao_format_shipstation_rates_response($rates);
 				if (is_array($fmt) && isset($fmt['rates'])) { $rates = $fmt['rates']; }
 			}
+
+			// Respect HP ShipStation Rates plugin allow‑list (single source of truth via helper)
+			$allowed = $this->getAllowedServiceCodes();
+			if (!empty($allowed)) {
+				$rates = array_values(array_filter($rates, function($r) use ($allowed){
+					if (!is_array($r)) { return false; }
+					$code = '';
+					if (isset($r['serviceCode'])) { $code = (string)$r['serviceCode']; }
+					elseif (isset($r['service_code'])) { $code = (string)$r['service_code']; }
+					elseif (isset($r['code'])) { $code = (string)$r['code']; }
+					$code = strtolower(trim($code));
+					return $code !== '' ? in_array($code, $allowed, true) : true; // if code unknown, keep
+				}));
+			}
+
 			return new WP_REST_Response(['rates' => $rates]);
 		} finally {
 			// Cleanup the transient order
@@ -116,6 +131,25 @@ class ShipStationController {
 		$core  = $base . 'eao-shipstation-core.php';
 		if (file_exists($utils)) { require_once $utils; }
 		if (file_exists($core)) { require_once $core; }
+	}
+
+	/**
+	 * Read allowed service codes from the HP ShipStation Rates plugin.
+	 * Single source of truth: requires helper function hp_ss_get_enabled_service_codes().
+	 * If helper is not present, no filtering is applied (plugin not active).
+	 *
+	 * @return array<string> Lowercase ShipStation serviceCode values that are enabled.
+	 */
+	private function getAllowedServiceCodes(): array {
+		if (function_exists('hp_ss_get_enabled_service_codes')) {
+			try {
+				$list = \hp_ss_get_enabled_service_codes();
+				if (is_array($list) && !empty($list)) {
+					return array_values(array_unique(array_map(function($s){ return strtolower(trim((string)$s)); }, $list)));
+				}
+			} catch (\Throwable $e) { /* ignore */ }
+		}
+		return [];
 	}
 
 	private function applyAddress($order, string $type, array $addr): void {
