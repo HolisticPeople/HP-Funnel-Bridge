@@ -92,16 +92,23 @@ class WebhookController {
 			}
 		}
 		// Items
+		$added_items = 0;
 		foreach ((array)$draft['items'] as $it) {
 			$qty = max(1, (int)($it['qty'] ?? 1));
 			$product = Resolver::resolveProductFromItem((array)$it);
 			if (!$product) { continue; }
-			$item = new \WC_Order_Item_Product();
-			$item->set_product($product);
-			$item->set_quantity($qty);
-			$item->set_subtotal($product->get_price() * $qty);
-			$item->set_total($product->get_price() * $qty);
-			$order->add_item($item);
+			// Prefer Woo's helper to add products so line items are identical to native orders
+			if (method_exists($order, 'add_product')) {
+				$order->add_product($product, $qty);
+			} else {
+				$item = new \WC_Order_Item_Product();
+				$item->set_product($product);
+				$item->set_quantity($qty);
+				$item->set_subtotal($product->get_price() * $qty);
+				$item->set_total($product->get_price() * $qty);
+				$order->add_item($item);
+			}
+			$added_items++;
 		}
 		// Address
 		$this->applyAddress($order, 'billing', array_merge((array)$draft['shipping_address'], ['email' => $email]));
@@ -192,7 +199,7 @@ class WebhookController {
 			$order->set_status('processing');
 		}
 		$order->save();
-		$this->debugLog('order created from pi.succeeded', ['order_id' => $order->get_id(), 'pi' => $pi_id, 'charge' => $charge_id, 'mode' => $modeLabel]);
+		$this->debugLog('order created from pi.succeeded', ['order_id' => $order->get_id(), 'items' => count($order->get_items('line_item')), 'shipping_items' => count($order->get_items('shipping')), 'pi' => $pi_id, 'charge' => $charge_id, 'mode' => $modeLabel]);
 
 		// Update Stripe PI + Charge description to include Woo order number for backoffice clarity
 		if ($pi_id !== '') {
