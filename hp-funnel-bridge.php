@@ -2,7 +2,7 @@
 /**
  * Plugin Name:       HP Funnel Bridge
  * Description:       Multi‑funnel bridge exposing REST endpoints for checkout, shipping rates, totals, and one‑click upsells. Reuses EAO (Stripe keys, ShipStation, YITH points) without modifying it.
- * Version:           0.2.22
+ * Version:           0.2.23
  * Requires at least: 6.0
  * Requires PHP:      7.4
  * Author:            Holistic People
@@ -15,7 +15,7 @@ if (!defined('ABSPATH')) {
 	exit;
 }
 
-define('HP_FB_PLUGIN_VERSION', '0.2.22');
+define('HP_FB_PLUGIN_VERSION', '0.2.23');
 define('HP_FB_PLUGIN_FILE', __FILE__);
 define('HP_FB_PLUGIN_DIR', plugin_dir_path(__FILE__));
 define('HP_FB_PLUGIN_URL', plugin_dir_url(__FILE__));
@@ -68,13 +68,38 @@ add_action('plugins_loaded', function () {
 }, 1);
 
 // Guard admin-ajax JSON for EAO refunds against noisy output from other plugins (open_basedir warnings etc.)
-add_action('init', function () {
-	if (defined('DOING_AJAX') && DOING_AJAX) {
-		$action = isset($_REQUEST['action']) ? (string) $_REQUEST['action'] : '';
-		if ($action === 'eao_payment_get_refund_data') {
-			// Start an output buffer as early as possible; our handler will clean buffers before sending JSON
-			if (function_exists('ob_start')) { @ob_start(); }
+// Clean noisy output (warnings) from other plugins for EAO refund AJAX endpoints so JSON stays valid
+if (!function_exists('hp_fb_json_sanitize_buffer')) {
+	function hp_fb_json_sanitize_buffer($buffer) {
+		// Keep only the first JSON object/array in the buffer
+		$posObj = strpos($buffer, '{');
+		$posArr = strpos($buffer, '[');
+		$start = false;
+		if ($posObj !== false && $posArr !== false) { $start = min($posObj, $posArr); }
+		elseif ($posObj !== false) { $start = $posObj; }
+		elseif ($posArr !== false) { $start = $posArr; }
+		if ($start === false) { return $buffer; }
+		$trimmed = substr($buffer, $start);
+		$endObj = strrpos($trimmed, '}');
+		$endArr = strrpos($trimmed, ']');
+		$end = false;
+		if ($endObj !== false && $endArr !== false) { $end = max($endObj, $endArr); }
+		elseif ($endObj !== false) { $end = $endObj; }
+		elseif ($endArr !== false) { $end = $endArr; }
+		if ($end !== false) {
+			$trimmed = substr($trimmed, 0, $end + 1);
 		}
+		return $trimmed;
+	}
+}
+add_action('init', function () {
+	if (!defined('DOING_AJAX') || !DOING_AJAX) { return; }
+	$action = isset($_REQUEST['action']) ? (string) $_REQUEST['action'] : '';
+	if ($action === 'eao_payment_get_refund_data' || $action === 'eao_payment_process_refund') {
+		// Reduce chance of warnings being printed
+		if (function_exists('ini_set')) { @ini_set('display_errors', '0'); }
+		// Start buffer with sanitizer
+		if (function_exists('ob_start')) { @ob_start('hp_fb_json_sanitize_buffer'); }
 	}
 }, 0);
 
