@@ -98,7 +98,7 @@ class ShipStationController {
 				if (is_array($fmt) && isset($fmt['rates'])) { $rates = $fmt['rates']; }
 			}
 
-			// Optional: respect HP ShipStation Rates plugin allow‑list if present
+			// Respect HP ShipStation Rates plugin allow‑list (single source of truth via helper)
 			$allowed = $this->getAllowedServiceCodes();
 			if (!empty($allowed)) {
 				$rates = array_values(array_filter($rates, function($r) use ($allowed){
@@ -134,62 +134,22 @@ class ShipStationController {
 	}
 
 	/**
-	 * Read allowed service codes from the user's "HP ShipStation Rates" settings if present.
-	 * Falls back gracefully when settings are unavailable.
+	 * Read allowed service codes from the HP ShipStation Rates plugin.
+	 * Single source of truth: requires helper function hp_ss_get_enabled_service_codes().
+	 * If helper is not present, no filtering is applied (plugin not active).
 	 *
 	 * @return array<string> Lowercase ShipStation serviceCode values that are enabled.
 	 */
 	private function getAllowedServiceCodes(): array {
-		// If the plugin exposes a helper, prefer it.
-		$possible_helpers = ['hp_ss_get_enabled_service_codes', 'hp_ss_enabled_services', 'hp_shipstation_enabled_services'];
-		foreach ($possible_helpers as $fn) {
-			if (function_exists($fn)) {
-				try {
-					$list = call_user_func($fn);
-					if (is_array($list) && !empty($list)) {
-						return array_values(array_unique(array_map(function($s){ return strtolower(trim((string)$s)); }, $list)));
-					}
-				} catch (\Throwable $e) { /* ignore */ }
-			}
-		}
-
-		// Try common option names used by our internal plugin.
-		$option_names = ['hp_ss_settings', 'hp_shipstation_rates_settings', 'hp_ss_enabled_services', 'hp_ss_services'];
-		$codes = [];
-		foreach ($option_names as $opt) {
-			$val = get_option($opt);
-			if (empty($val)) { continue; }
-			$this->collectServiceCodes($val, $codes);
-		}
-		$codes = array_values(array_unique(array_map(function($s){ return strtolower(trim((string)$s)); }, $codes)));
-		return $codes;
-	}
-
-	/**
-	 * Recursively collect enabled service codes from arbitrary settings arrays.
-	 *
-	 * @param mixed $node
-	 * @param array $out pass-by-ref collector
-	 */
-	private function collectServiceCodes($node, array &$out): void {
-		if (is_array($node)) {
-			// structures like ['service_code' => 'usps_priority_mail', 'enable' => 1]
-			$code = $node['service_code'] ?? ($node['serviceCode'] ?? ($node['code'] ?? null));
-			$enabled = $node['enable'] ?? ($node['enabled'] ?? ($node['active'] ?? null));
-			if ($code && ($enabled === true || $enabled === 1 || $enabled === '1' || $enabled === 'on')) {
-				$out[] = (string)$code;
-			}
-			// structures like ['enabled_services' => ['usps_priority_mail'=>1, ...]]
-			if (isset($node['enabled_services']) && is_array($node['enabled_services'])) {
-				foreach ($node['enabled_services'] as $k => $v) {
-					if ($v) { $out[] = is_string($k) ? $k : (string)$v; }
+		if (function_exists('hp_ss_get_enabled_service_codes')) {
+			try {
+				$list = \hp_ss_get_enabled_service_codes();
+				if (is_array($list) && !empty($list)) {
+					return array_values(array_unique(array_map(function($s){ return strtolower(trim((string)$s)); }, $list)));
 				}
-			}
-			// Generic traversal
-			foreach ($node as $v) {
-				if (is_array($v)) { $this->collectServiceCodes($v, $out); }
-			}
+			} catch (\Throwable $e) { /* ignore */ }
 		}
+		return [];
 	}
 
 	private function applyAddress($order, string $type, array $addr): void {
