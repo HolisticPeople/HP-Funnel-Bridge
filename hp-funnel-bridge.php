@@ -163,11 +163,19 @@ add_filter('query_vars', function ($vars) {
 	$vars[] = 'hp_fb_confirm';
 	return $vars;
 });
+// Start an early output buffer for the hosted confirm page to swallow noisy warnings from other plugins
+add_action('template_redirect', function () {
+	if (!isset($_GET['hp_fb_confirm'])) { return; }
+	if (function_exists('ob_start')) { @ob_start(); }
+}, 0);
+
 add_action('template_redirect', function () {
 	$flag = get_query_var('hp_fb_confirm');
 	if (!$flag) { return; }
 	// Avoid noisy PHP warnings polluting the hosted page
 	if (function_exists('ini_set')) { @ini_set('display_errors', '0'); }
+	// Clear any buffered output collected before we render the HTML
+	if (function_exists('ob_get_level') && ob_get_level() > 0) { @ob_end_clean(); }
 	$cs = isset($_GET['cs']) ? (string)$_GET['cs'] : '';
 	if ($cs === '') {
 		status_header(400);
