@@ -204,6 +204,10 @@ class EAORefundCompat {
 			]);
 		}
 
+		// Ensure clean JSON (strip any prior buffered warnings from other plugins)
+		if (function_exists('ob_get_level')) {
+			while (ob_get_level() > 0) { @ob_end_clean(); }
+		}
 		wp_send_json_success(array(
 			'hp_fb_refund_compat' => true,
 			'items' => $items_resp,
