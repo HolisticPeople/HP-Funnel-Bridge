@@ -13,11 +13,34 @@ if (!defined('ABSPATH')) { exit; }
 
 class WebhookController {
 	public function register_routes(): void {
+		// Accept POST for real Stripe deliveries, and also allow GET so tools
+		// that probe the endpoint (e.g. Stripe Workbench “event destination”)
+		// don’t fail on a 404 during creation. GET simply returns a 200/OK.
 		register_rest_route('hp-funnel/v1', '/stripe/webhook', [
-			'methods'  => 'POST',
-			'callback' => [$this, 'handle'],
+			'methods'  => ['POST', 'GET'],
+			'callback' => [$this, 'receive'],
 			'permission_callback' => '__return_true',
 		]);
+	}
+
+	/**
+	 * Wrapper that returns 200 for non-POST (health-check/ping), otherwise
+	 * forwards to the actual webhook handler.
+	 */
+	public function receive(WP_REST_Request $request) {
+		if (strtoupper($request->get_method() ?? '') !== 'POST') {
+			$mode = 'unknown';
+			try {
+				$stripe = new \HP_FB\Stripe\Client(null);
+				$mode = $stripe->mode ?? 'unknown';
+			} catch (\Throwable $e) {}
+			return new WP_REST_Response([
+				'ok' => true,
+				'message' => 'hp-funnel-bridge stripe webhook endpoint',
+				'mode' => $mode,
+			], 200);
+		}
+		return $this->handle($request);
 	}
 
 	public function handle(WP_REST_Request $request) {
