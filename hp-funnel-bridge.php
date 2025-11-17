@@ -57,6 +57,10 @@ if (is_admin()) {
 		if (class_exists('\HP_FB\Admin\Tweaks')) {
 			(new \HP_FB\Admin\Tweaks())->register();
 		}
+		// Register EAO refund compatibility shim to ensure refund items appear for Bridge orders
+		if (class_exists('\HP_FB\Admin\EAORefundCompat')) {
+			(new \HP_FB\Admin\EAORefundCompat())->register();
+		}
 	});
 }
 
