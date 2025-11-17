@@ -166,6 +166,8 @@ add_filter('query_vars', function ($vars) {
 add_action('template_redirect', function () {
 	$flag = get_query_var('hp_fb_confirm');
 	if (!$flag) { return; }
+	// Avoid noisy PHP warnings polluting the hosted page
+	if (function_exists('ini_set')) { @ini_set('display_errors', '0'); }
 	$cs = isset($_GET['cs']) ? (string)$_GET['cs'] : '';
 	if ($cs === '') {
 		status_header(400);
