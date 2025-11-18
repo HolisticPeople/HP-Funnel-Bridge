@@ -76,7 +76,16 @@ class TotalsController {
       $order->calculate_totals(false);
       $products_gross = (float) $order->get_subtotal();
       $discount_total = (float) $order->get_discount_total();
-      $products_net = max(0.0, $products_gross - $discount_total);
+      // Apply global 10% discount on products as a negative fee (to mirror storefront display)
+      $global_discount = round($products_gross * 0.10, 2);
+      if ($global_discount > 0.0) {
+        $fee = new \WC_Order_Item_Fee();
+        $fee->set_name('Global discount (10%)');
+        $fee->set_amount(-1 * $global_discount);
+        $fee->set_total(-1 * $global_discount);
+        $order->add_item($fee);
+      }
+      $products_net = max(0.0, $products_gross - $discount_total - $global_discount);
 
       // Points discount (preview only). Cap to products_net (no points on shipping).
       $pointsDiscount = 0.0;
@@ -116,7 +125,8 @@ class TotalsController {
         'discount_total' => (float)$order->get_discount_total(),
         'shipping_total' => (float)$order->get_shipping_total(),
 				'tax_total' => (float)$order->get_total_tax(),
-				'fees_total' => (float)$order->get_fees() ? array_sum(array_map(function($f){ return (float)$f->get_total(); }, $order->get_fees())) : 0.0,
+        'fees_total' => (float)$order->get_fees() ? array_sum(array_map(function($f){ return (float)$f->get_total(); }, $order->get_fees())) : 0.0,
+        'global_discount' => (float)$global_discount,
         'points_discount' => (float)$pointsDiscount,
         'grand_total' => (float)$grand_manual,
 			]);

@@ -121,7 +121,16 @@ class CheckoutController {
       $order->calculate_totals(false);
       $products_gross = (float)$order->get_subtotal();
       $discount_total = (float)$order->get_discount_total();
-      $products_net = max(0.0, $products_gross - $discount_total);
+      // Apply global 10% discount as a negative fee to align with storefront
+      $global_discount = round($products_gross * 0.10, 2);
+      if ($global_discount > 0.0) {
+        $fee = new \WC_Order_Item_Fee();
+        $fee->set_name('Global discount (10%)');
+        $fee->set_amount(-1 * $global_discount);
+        $fee->set_total(-1 * $global_discount);
+        $order->add_item($fee);
+      }
+      $products_net = max(0.0, $products_gross - $discount_total - $global_discount);
 
       // Points as negative fee now; webhook will reconcile via YITH. Cap to products_net.
       $ps = new PointsService();
