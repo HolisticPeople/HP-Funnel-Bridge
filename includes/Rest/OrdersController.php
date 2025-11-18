@@ -81,12 +81,24 @@ class OrdersController {
 			$discount = max(0.0, $sub - $total);
 			$subtotal += $sub;
 			$items_discount += $discount;
+			$image = '';
+			try {
+				$prod = $it->get_product();
+				if ($prod && method_exists($prod, 'get_image_id')) {
+					$img_id = $prod->get_image_id();
+					if ($img_id) {
+						$img_url = wp_get_attachment_image_url($img_id, 'thumbnail');
+						if ($img_url) { $image = (string) $img_url; }
+					}
+				}
+			} catch (\Throwable $e) {}
 			$items[] = [
 				'name' => $name,
 				'qty'  => $qty,
 				'price'=> round($price, 2),
 				'discount' => round($discount, 2),
 				'total'=> round($total, 2),
+				'image'=> $image,
 			];
 		}
 
