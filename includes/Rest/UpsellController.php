@@ -2,6 +2,7 @@
 namespace HP_FB\Rest;
 
 use HP_FB\Stripe\Client as StripeClient;
+use HP_FB\Util\Resolver;
 use WP_REST_Request;
 use WP_REST_Response;
 use WP_Error;
@@ -79,7 +80,7 @@ class UpsellController {
 		if (!$stripe->isConfigured()) {
 			return new WP_Error('stripe_not_configured', 'Stripe keys are missing', ['status' => 500]);
 		}
-		// Off-session PI using default PM on customer
+		// Off-session PI using saved payment method
 		$params = [
 			'amount' => $amount_cents,
 			'currency' => strtolower(get_woocommerce_currency('USD') ?: 'usd'),
@@ -97,50 +98,47 @@ class UpsellController {
 		if (!$pi || (string)($pi['status'] ?? '') !== 'succeeded') {
 			return new WP_Error('stripe_pi', 'Off-session charge failed', ['status' => 402, 'debug' => $pi]);
 		}
-		// Create child order
-		$child = wc_create_order();
-		if ($parent->get_customer_id()) {
-			$child->set_customer_id($parent->get_customer_id());
-		}
+
+		// Attach the upsell to the original (parent) order: add products or a fee and recalc totals.
 		foreach ($items as $it) {
-			$product_id = isset($it['product_id']) ? (int)$it['product_id'] : 0;
-			$variation_id = isset($it['variation_id']) ? (int)$it['variation_id'] : 0;
 			$qty = max(1, (int)($it['qty'] ?? 1));
-			if ($product_id <= 0) { continue; }
-			$product = wc_get_product($variation_id > 0 ? $variation_id : $product_id);
+			$product = Resolver::resolveProductFromItem($it);
 			if (!$product) { continue; }
-			$item = new \WC_Order_Item_Product();
-			$item->set_product($product);
-			$item->set_quantity($qty);
-			$item->set_subtotal($product->get_price() * $qty);
-			$item->set_total($product->get_price() * $qty);
-			$child->add_item($item);
+			if (function_exists('wc_add_product_to_order')) {
+				wc_add_product_to_order($parent->get_id(), $product, $qty);
+			} else {
+				$item = new \WC_Order_Item_Product();
+				$item->set_product($product);
+				$item->set_quantity($qty);
+				$item->set_subtotal($product->get_price() * $qty);
+				$item->set_total($product->get_price() * $qty);
+				$parent->add_item($item);
+			}
 		}
-		// If no product items were provided, record the upsell as a fee line so totals match.
 		if ($added_items === 0) {
 			$label = (string) ($request->get_param('fee_label') ?? 'Off The Fast Kit');
 			$fee = new \WC_Order_Item_Fee();
 			$fee->set_name($label);
 			$fee->set_total($amount);
-			$child->add_item($fee);
+			$parent->add_item($fee);
 		}
-		// Copy addresses from parent
-		$this->copyAddress($parent, $child, 'billing');
-		$this->copyAddress($parent, $child, 'shipping');
-		$child->calculate_totals(false);
-		// Meta and notes
-		$child->update_meta_data('_hp_fb_parent_order_id', $parent_order_id);
-		if (!empty($pi['id'])) { $child->update_meta_data('_hp_fb_stripe_payment_intent_id', (string)$pi['id']); }
-		if (!empty($pi['latest_charge'])) { $child->update_meta_data('_hp_fb_stripe_charge_id', (string)$pi['latest_charge']); }
-		$child->add_order_note('Funnel: ' . $funnel_name . ' (upsell)');
-		if (method_exists($child, 'payment_complete') && !empty($pi['latest_charge'])) {
-			$child->set_transaction_id((string)$pi['latest_charge']);
-			$child->payment_complete((string)$pi['latest_charge']);
-		} else {
-			$child->set_status('processing');
-		}
-		$child->save();
-		return new WP_REST_Response(['ok' => true, 'order_id' => $child->get_id()]);
+		$parent->calculate_totals(false);
+
+		// Meta and notes on parent
+		if (!empty($pi['id'])) { $parent->update_meta_data('_hp_fb_upsell_payment_intent_id', (string)$pi['id']); }
+		if (!empty($pi['latest_charge'])) { $parent->update_meta_data('_hp_fb_upsell_charge_id', (string)$pi['latest_charge']); }
+		$parent->add_order_note('Funnel: ' . $funnel_name . ' (upsell)');
+		$parent->save();
+
+		// Update Stripe PI/Charge descriptions to include order number and "Upsell"
+		try {
+			$order_no = method_exists($parent, 'get_order_number') ? (string) $parent->get_order_number() : (string) $parent->get_id();
+			$desc = 'HolisticPeople - ' . $funnel_name . ' - Order #' . $order_no . ' - Upsell';
+			if (!empty($pi['id'])) { $stripe->updatePaymentIntent((string)$pi['id'], ['description' => $desc]); }
+			if (!empty($pi['latest_charge'])) { $stripe->updateCharge((string)$pi['latest_charge'], ['description' => $desc]); }
+		} catch (\Throwable $e) {}
+
+		return new WP_REST_Response(['ok' => true, 'order_id' => $parent->get_id()]);
 	}
 
 	private function copyAddress($from, $to, string $type): void {
