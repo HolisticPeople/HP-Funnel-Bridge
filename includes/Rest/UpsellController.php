@@ -22,8 +22,11 @@ class UpsellController {
 		$parent_order_id = (int) ($request->get_param('parent_order_id') ?? 0);
 		$items = (array) $request->get_param('items');
 		$funnel_name = (string) ($request->get_param('funnel_name') ?? 'Funnel');
-		if ($parent_order_id <= 0 || empty($items)) {
-			return new WP_Error('bad_request', 'parent_order_id and items are required', ['status' => 400]);
+		// Allow either explicit items OR an amount_override; at least one is required
+		$override = $request->get_param('amount_override');
+		$has_override = is_numeric($override) && (float)$override > 0;
+		if ($parent_order_id <= 0 || (empty($items) && !$has_override)) {
+			return new WP_Error('bad_request', 'parent_order_id and items or amount_override are required', ['status' => 400]);
 		}
 		$parent = wc_get_order($parent_order_id);
 		if (!$parent) {
@@ -46,8 +49,7 @@ class UpsellController {
 			$amount += (float)$product->get_price() * $qty;
 			$added_items++;
 		}
-		$override = $request->get_param('amount_override');
-		if (is_numeric($override) && (float)$override > 0) {
+		if ($has_override) {
 			$amount = (float)$override;
 		}
 		$amount_cents = (int) round($amount * 100);
