@@ -85,13 +85,15 @@
               var t = await r.json();
               if (t && t.order_id) {
                 var uu = new URL(succ);
-                if (uu.search) {
-                  uu.search +=
-                    "&order_id=" + encodeURIComponent(String(t.order_id));
-                } else {
-                  uu.search =
-                    "?order_id=" + encodeURIComponent(String(t.order_id));
-                }
+                // redirect to funnel base with go=upsell so SPA can rewrite without server rewrites
+                var parts = uu.pathname.split("/");
+                if (parts[parts.length - 1] === "") parts.pop();
+                if (parts[parts.length - 1] === "upsell") parts.pop();
+                uu.pathname = parts.join("/") + "/";
+                uu.search = "";
+                uu.hash = "";
+                uu.searchParams.set("go", "upsell");
+                uu.searchParams.set("order_id", String(t.order_id));
                 window.location.replace(uu.toString());
                 return;
               }
@@ -101,27 +103,23 @@
             setTimeout(res, 1000);
           });
         }
-        // fallback
+        // fallback: still go to funnel base with go=upsell
         try {
           var baseUrl = new URL(succ);
-          if (!baseUrl.hash || baseUrl.hash === "#" || baseUrl.hash === "") {
-            baseUrl.hash = "#upsell";
-          }
-          if (baseUrl.search) {
-            baseUrl.search += "&pi_id=" + encodeURIComponent(piId);
-          } else {
-            baseUrl.search = "?pi_id=" + encodeURIComponent(piId);
-          }
+          var p = baseUrl.pathname.split("/");
+          if (p[p.length - 1] === "") p.pop();
+          if (p[p.length - 1] === "upsell") p.pop();
+          baseUrl.pathname = p.join("/") + "/";
+          baseUrl.search = "";
+          baseUrl.hash = "";
+          baseUrl.searchParams.set("go", "upsell");
+          baseUrl.searchParams.set("pi_id", piId);
           window.location.replace(baseUrl.toString());
         } catch (_) {
           try {
             var u2 = new URL(ret);
-            u2.hash = "#upsell";
-            if (u2.search) {
-              u2.search += "&pi_id=" + encodeURIComponent(piId);
-            } else {
-              u2.search = "?pi_id=" + encodeURIComponent(piId);
-            }
+            u2.searchParams.set("go", "upsell");
+            u2.searchParams.set("pi_id", piId);
             window.location.replace(u2.toString());
           } catch (__) {}
         }
