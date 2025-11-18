@@ -91,6 +91,9 @@ class OrdersController {
 						if ($img_url) { $image = (string) $img_url; }
 					}
 				}
+				if ($prod && method_exists($prod, 'get_sku')) {
+					$sku = (string) $prod->get_sku();
+				} else { $sku = ''; }
 			} catch (\Throwable $e) {}
 			$items[] = [
 				'name' => $name,
@@ -99,6 +102,7 @@ class OrdersController {
 				'discount' => round($discount, 2),
 				'total'=> round($total, 2),
 				'image'=> $image,
+				'sku'  => $sku,
 			];
 		}
 
