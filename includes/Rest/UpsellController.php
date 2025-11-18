@@ -36,6 +36,24 @@ class UpsellController {
 		if ($cus === '') {
 			return new WP_Error('missing_customer', 'Parent order missing Stripe customer id', ['status' => 400]);
 		}
+		// Try to reuse the same payment method as the parent charge
+		$pm_id = '';
+		try {
+			$stripe = new StripeClient();
+			$parent_pi = (string) $parent->get_meta('_hp_fb_stripe_payment_intent_id', true);
+			if ($parent_pi !== '') {
+				$pi_data = $stripe->retrievePaymentIntent($parent_pi);
+				if (is_array($pi_data) && !empty($pi_data['payment_method'])) {
+					$pm_id = (string) $pi_data['payment_method'];
+				}
+			}
+			if ($pm_id === '') {
+				$cust = $stripe->retrieveCustomer($cus);
+				if (is_array($cust) && !empty($cust['invoice_settings']['default_payment_method'])) {
+					$pm_id = (string) $cust['invoice_settings']['default_payment_method'];
+				}
+			}
+		} catch (\Throwable $e) {}
 		// Amount
 		$amount = 0.0;
 		$added_items = 0;
@@ -57,7 +75,7 @@ class UpsellController {
 			return new WP_Error('bad_amount', 'Amount must be greater than zero', ['status' => 400]);
 		}
 
-		$stripe = new StripeClient();
+		// (re)use client
 		if (!$stripe->isConfigured()) {
 			return new WP_Error('stripe_not_configured', 'Stripe keys are missing', ['status' => 500]);
 		}
@@ -68,9 +86,13 @@ class UpsellController {
 			'customer' => $cus,
 			'off_session' => 'true',
 			'confirm' => 'true',
+			'payment_method_types[]' => 'card',
 			'metadata[parent_order_id]' => (string)$parent_order_id,
 			'metadata[funnel_name]' => $funnel_name,
 		];
+		if ($pm_id !== '') {
+			$params['payment_method'] = $pm_id;
+		}
 		$pi = $stripe->createPaymentIntent($params);
 		if (!$pi || (string)($pi['status'] ?? '') !== 'succeeded') {
 			return new WP_Error('stripe_pi', 'Off-session charge failed', ['status' => 402, 'debug' => $pi]);

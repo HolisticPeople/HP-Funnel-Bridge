@@ -144,6 +144,20 @@ class Client {
 		$code = (int) wp_remote_retrieve_response_code($resp);
 		return $code >= 200 && $code < 300;
 	}
+
+	/**
+	 * Retrieve a Customer (e.g., to inspect default payment method).
+	 */
+	public function retrieveCustomer(string $customerId): ?array {
+		if ($customerId === '') { return null; }
+		$resp = wp_remote_get('https://api.stripe.com/v1/customers/' . rawurlencode($customerId), [
+			'headers' => ['Authorization' => 'Bearer ' . $this->secret],
+			'timeout' => 25,
+		]);
+		if (is_wp_error($resp)) { return null; }
+		$data = json_decode(wp_remote_retrieve_body($resp), true);
+		return is_array($data) ? $data : null;
+	}
 }
 
 
