@@ -117,8 +117,9 @@ class UpsellController {
 			if (function_exists('wc_add_product_to_order')) {
 				$item = wc_add_product_to_order($parent->get_id(), $product, $qty);
 				if ($item && is_object($item)) {
+					// Keep MSRP in subtotal, write discounted total
+					if (method_exists($item, 'set_subtotal')) { $item->set_subtotal($unit * $qty); }
 					if (method_exists($item, 'set_total')) { $item->set_total($unit_after * $qty); }
-					if (method_exists($item, 'set_subtotal')) { $item->set_subtotal($unit_after * $qty); }
 					if (method_exists($item, 'update_meta_data')) {
 						$item->update_meta_data('_eao_exclude_global_discount', 1);
 						$item->update_meta_data('_eao_item_discount_percent', $upsell_percent);
@@ -130,7 +131,8 @@ class UpsellController {
 				$item = new \WC_Order_Item_Product();
 				$item->set_product($product);
 				$item->set_quantity($qty);
-				$item->set_subtotal($unit_after * $qty);
+				// Keep MSRP in subtotal, discounted in total
+				$item->set_subtotal($unit * $qty);
 				$item->set_total($unit_after * $qty);
 				$item->update_meta_data('_eao_exclude_global_discount', 1);
 				$item->update_meta_data('_eao_item_discount_percent', $upsell_percent);
@@ -150,6 +152,9 @@ class UpsellController {
 		// Meta and notes on parent
 		if (!empty($pi['id'])) { $parent->update_meta_data('_hp_fb_upsell_payment_intent_id', (string)$pi['id']); }
 		if (!empty($pi['latest_charge'])) { $parent->update_meta_data('_hp_fb_upsell_charge_id', (string)$pi['latest_charge']); }
+		// Bump EAO last charged amount so refund UI reflects full paid total (checkout + upsell)
+		$prev_cents = (int) $parent->get_meta('_eao_last_charged_amount_cents', true);
+		$parent->update_meta_data('_eao_last_charged_amount_cents', $prev_cents + $amount_cents);
 		$parent->add_order_note('Funnel: ' . $funnel_name . ' (upsell)');
 		$parent->save();
 
