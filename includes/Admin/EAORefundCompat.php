@@ -184,34 +184,61 @@ class EAORefundCompat {
 		if ($logger) { $logger->info('EAORefundCompat: handling refund data', ['source' => 'hp-funnel-bridge', 'order_id' => $order_id]); }
 
 		$items_resp = [];
-
 		$order_items = $order->get_items('line_item');
-		$products_total = 0.0;
+		
+		$checkout_charge_id = (string) $order->get_meta('_hp_fb_stripe_charge_id', true);
+		$total_charged_cents = (int) $order->get_meta('_eao_last_charged_amount_cents');
+		$total_charged = $total_charged_cents > 0 ? ($total_charged_cents / 100.0) : (float) $order->get_total();
+		$shipping_paid_total = (float) $order->get_shipping_total() + (float) $order->get_shipping_tax();
+
+		// Identify upsell items and calculate their "paid in full" amounts
+		$upsell_items_total_paid = 0.0;
 		$per_item_base = [];
+		$main_charge_items_base_total = 0.0;
+		
+		// Pre-calculate line totals
 		foreach ($order_items as $iid => $it) {
 			$base = (float) $it->get_total() + (float) $it->get_total_tax();
 			if ($base <= 0.0001) { $base = (float) $it->get_subtotal() + (float) $it->get_subtotal_tax(); }
 			$per_item_base[$iid] = $base;
-			$products_total += $base;
+			
+			$item_charge_id = (string) $it->get_meta('_hp_fb_charge_id', true);
+			if ($item_charge_id && $item_charge_id !== $checkout_charge_id) {
+				// This is an upsell item (separate charge), paid in full
+				$upsell_items_total_paid += $base;
+			} else {
+				// This is a main charge item
+				$main_charge_items_base_total += $base;
+			}
 		}
 
-		$charged_cents_meta = (int) $order->get_meta('_eao_last_charged_amount_cents');
-		$charged_cents = $charged_cents_meta > 0 ? $charged_cents_meta : (int) round(((float) $order->get_total()) * 100);
-		$charged_total = $charged_cents / 100.0;
-		$shipping_paid_total = (float) $order->get_shipping_total() + (float) $order->get_shipping_tax();
+		// The remaining amount from the total charge is what's available for the main charge items (minus shipping)
+		// Note: We assume shipping is part of the main charge.
+		$main_charge_total = max(0.0, $total_charged - $upsell_items_total_paid);
+		$main_charge_product_pool = max(0.0, $main_charge_total - $shipping_paid_total);
 
 		$line_share = [];
 		$line_remaining_share = [];
 		$sum_remaining = 0.0;
 		$products_refunded_total = 0.0;
+
 		foreach ($order_items as $item_id => $item) {
-			$wc_base = isset($per_item_base[$item_id]) ? (float) $per_item_base[$item_id] : 0.0;
-			$product_charged_total = max(0.0, $charged_total - $shipping_paid_total);
-			$share = ($products_total > 0.0) ? ($product_charged_total * ($wc_base / $products_total)) : 0.0;
+			$base = isset($per_item_base[$item_id]) ? (float) $per_item_base[$item_id] : 0.0;
+			$item_charge_id = (string) $item->get_meta('_hp_fb_charge_id', true);
+			
+			if ($item_charge_id && $item_charge_id !== $checkout_charge_id) {
+				// Upsell item: share is exactly its base (paid in full)
+				$share = $base;
+			} else {
+				// Main charge item: share is proportional to its base vs total main charge product base
+				$share = ($main_charge_items_base_total > 0.0) ? ($main_charge_product_pool * ($base / $main_charge_items_base_total)) : 0.0;
+			}
+
 			$refunded_item = method_exists($order, 'get_total_refunded_for_item') ? (float) $order->get_total_refunded_for_item($item_id) : 0.0;
 			$refunded_tax  = method_exists($order, 'get_total_tax_refunded_for_item') ? (float) $order->get_total_tax_refunded_for_item($item_id) : 0.0;
 			$refunded_line = $refunded_item + $refunded_tax;
 			$remaining = max(0.0, $share - $refunded_line);
+			
 			$products_refunded_total += $refunded_line;
 			$line_share[$item_id] = array('share' => $share, 'refunded' => $refunded_line);
 			$line_remaining_share[$item_id] = $remaining;
@@ -219,32 +246,51 @@ class EAORefundCompat {
 		}
 
 		// Scale remaining to never exceed product portion of remaining charge
+		// We need to do this per-charge group ideally, but for now let's just ensure global consistency
+		// Actually, since we split the calculation, the sums should be exact. 
+		// But we'll keep the scaling logic just in case of rounding drifts, but applied to the whole.
+		// To be safe, we should really just rely on $line_remaining_share.
+		// Let's keep the rounding logic to ensure cents match.
+		
 		$scaled_remaining_cents = [];
-		$product_charged_total = max(0.0, $charged_total - $shipping_paid_total);
-		$product_remaining_total = max(0.0, $product_charged_total - $products_refunded_total);
-		$target_cents = (int) round($product_remaining_total * 100);
-		if ($sum_remaining <= 0.0001) {
-			foreach ($order_items as $item_id => $item) { $scaled_remaining_cents[$item_id] = 0; }
-		} else {
-			$factor = min(1.0, ($product_remaining_total > 0 ? ($product_remaining_total / $sum_remaining) : 0));
-			$acc = 0; $i = 0; $last = count($order_items) - 1;
-			foreach ($order_items as $item_id => $item) {
-				$rem = $line_remaining_share[$item_id] * $factor;
-				$cents = ($i === $last) ? max(0, $target_cents - $acc) : (int) round($rem * 100);
-				$scaled_remaining_cents[$item_id] = $cents; $acc += $cents; $i++;
+		foreach ($order_items as $item_id => $item) {
+			$scaled_remaining_cents[$item_id] = (int) round($line_remaining_share[$item_id] * 100);
+		}
+
+		// Points distribution
+		// Distribute points ONLY to items belonging to the main charge
+		$points_redeemed_total = (int) $order->get_meta('_ywpar_coupon_points', true);
+		$per_item_points_initial = [];
+		
+		if ($points_redeemed_total > 0) {
+			$main_items_keys = [];
+			foreach ($order_items as $iid => $it) {
+				$ch_id = (string) $it->get_meta('_hp_fb_charge_id', true);
+				if (!$ch_id || $ch_id === $checkout_charge_id) {
+					$main_items_keys[] = $iid;
+				}
+			}
+			
+			$acc_pts = 0; $i_pts = 0; $last_pts = max(0, count($main_items_keys) - 1);
+			
+			foreach ($order_items as $iid => $it) {
+				// Default to 0
+				$per_item_points_initial[$iid] = 0;
+				
+				// If main item, calculate share
+				if (in_array($iid, $main_items_keys)) {
+					$base = isset($per_item_base[$iid]) ? (float) $per_item_base[$iid] : 0.0;
+					// Use main_charge_items_base_total as denominator
+					$portion = ($main_charge_items_base_total > 0.0) ? ($base / $main_charge_items_base_total) : 0.0;
+					
+					$alloc = ($i_pts === $last_pts) ? max(0, $points_redeemed_total - $acc_pts) : (int) round($points_redeemed_total * $portion);
+					$per_item_points_initial[$iid] = $alloc;
+					$acc_pts += $alloc;
+					$i_pts++;
+				}
 			}
 		}
 
-		// Points distribution (approximate to match EAO UI expectations)
-		$points_redeemed_total = (int) $order->get_meta('_ywpar_coupon_points', true);
-		$per_item_points_initial = [];
-		$acc_pts = 0; $i_pts = 0; $last_pts = max(0, count($order_items) - 1);
-		foreach ($order_items as $iid => $it_tmp) {
-			$base = isset($per_item_base[$iid]) ? (float) $per_item_base[$iid] : 0.0;
-			$portion = ($products_total > 0.0) ? ($base / $products_total) : 0.0;
-			$alloc = ($i_pts === $last_pts) ? max(0, $points_redeemed_total - $acc_pts) : (int) round($points_redeemed_total * $portion);
-			$per_item_points_initial[$iid] = $alloc; $acc_pts += $alloc; $i_pts++;
-		}
 		$per_item_points_refunded = [];
 		foreach ($order->get_refunds() as $r) {
 			$map_json = (string) get_post_meta($r->get_id(), '_eao_points_refunded_map', true);
@@ -348,5 +394,3 @@ class EAORefundCompat {
 		));
 	}
 }
-
-
