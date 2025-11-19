@@ -124,20 +124,49 @@ class WebhookController {
 				}
 			}
 		}
-		// First totals pass to compute gross products for discount
+		// First totals pass so WooCommerce has a baseline before we apply discounts
 		$order->calculate_totals(false);
 
-		// Apply global 10% discount as a negative fee (matches checkout/totals endpoints)
-		$products_gross = (float) $order->get_subtotal();
-		$global_discount = round($products_gross * 0.10, 2);
-		if ($global_discount > 0.0) {
-			$fee = new \WC_Order_Item_Fee();
-			$fee->set_name('Global discount (10%)');
-			$fee->set_amount(-1 * $global_discount);
-			$fee->set_total(-1 * $global_discount);
-			$order->add_item($fee);
-			// Persist EAO global discount percent so the admin UI shows 10%
-			$order->update_meta_data('_eao_global_product_discount_percent', 10);
+		// Apply global 10% discount by adjusting line item totals (no separate fee),
+		// mirroring how EAO admin orders persist global discounts.
+		$global_percent = 10.0;
+		if ($global_percent > 0.0) {
+			$line_items = $order->get_items('line_item');
+			$products_gross = 0.0;
+			foreach ($line_items as $li) {
+				$products_gross += (float) $li->get_subtotal();
+			}
+			if ($products_gross > 0.0) {
+				$global_discount = round($products_gross * ($global_percent / 100.0), 2);
+				$target_cents = (int) round($global_discount * 100);
+				// Distribute discount across items in cents to preserve the exact total.
+				$alloc_cents = [];
+				$acc = 0;
+				$idx = 0;
+				$last = count($line_items) - 1;
+				foreach ($line_items as $item_id => $li) {
+					$sub = (float) $li->get_subtotal();
+					$raw = ($sub * ($global_percent / 100.0));
+					$cents = ($idx === $last) ? max(0, $target_cents - $acc) : (int) round($raw * 100);
+					$alloc_cents[$item_id] = $cents;
+					$acc += $cents;
+					$idx++;
+				}
+				// Apply allocated discounts to each line item total.
+				foreach ($line_items as $item_id => $li) {
+					$sub = (float) $li->get_subtotal();
+					$disc_cents = isset($alloc_cents[$item_id]) ? $alloc_cents[$item_id] : 0;
+					$new_total = max(0.0, $sub - ($disc_cents / 100.0));
+					if (method_exists($li, 'set_total')) {
+						$li->set_total($new_total);
+					}
+					if (method_exists($li, 'save')) {
+						$li->save();
+					}
+				}
+				// Persist EAO global discount percent so the admin UI shows 10%.
+				$order->update_meta_data('_eao_global_product_discount_percent', $global_percent);
+			}
 		}
 
 		// Points redemption (requires user) — run after global discount so cap is correct
