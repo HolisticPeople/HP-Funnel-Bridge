@@ -23,7 +23,6 @@ class EAORefundCompat {
 	 * perform multiple Stripe refunds, then create a single wc_refund on the order.
 	 */
 	public function maybeProcessRefund(): void {
-		$logger = (function_exists('wc_get_logger') && ((defined('WP_DEBUG') && WP_DEBUG) || (defined('WP_DEBUG_LOG') && WP_DEBUG_LOG))) ? \wc_get_logger() : null;
 		$order_id = isset($_POST['order_id']) ? absint($_POST['order_id']) : 0;
 		if (!$order_id) { return; }
 		$order = wc_get_order($order_id);
@@ -158,18 +157,11 @@ class EAORefundCompat {
 	}
 
 	public function maybeHandleRefundData(): void {
-		$logger = (function_exists('wc_get_logger') && ((defined('WP_DEBUG') && WP_DEBUG) || (defined('WP_DEBUG_LOG') && WP_DEBUG_LOG))) ? \wc_get_logger() : null;
 		// Basic guards and order resolution
 		$order_id = isset($_POST['order_id']) ? absint($_POST['order_id']) : 0;
-		if (!$order_id) {
-			if ($logger) { $logger->warning('EAORefundCompat: missing order_id', ['source' => 'hp-funnel-bridge']); }
-			return;
-		}
+		if (!$order_id) { return; }
 		$order = wc_get_order($order_id);
-		if (!$order) {
-			if ($logger) { $logger->warning('EAORefundCompat: order not found', ['source' => 'hp-funnel-bridge', 'order_id' => $order_id]); }
-			return;
-		}
+		if (!$order) { return; }
 
 		// Only take over for Bridge-created Stripe orders
 		$is_bridge = (
@@ -177,11 +169,7 @@ class EAORefundCompat {
 			(string) $order->get_meta('_hp_fb_stripe_charge_id', true) !== '' ||
 			(string) $order->get_payment_method() === 'hp_fb_stripe'
 		);
-		if (!$is_bridge) {
-			if ($logger) { $logger->info('EAORefundCompat: non-bridge order, letting EAO handle', ['source' => 'hp-funnel-bridge', 'order_id' => $order_id]); }
-			return;
-		}
-		if ($logger) { $logger->info('EAORefundCompat: handling refund data', ['source' => 'hp-funnel-bridge', 'order_id' => $order_id]); }
+		if (!$is_bridge) { return; }
 
 		$items_resp = [];
 		$order_items = $order->get_items('line_item');
@@ -372,15 +360,6 @@ class EAORefundCompat {
 			$mode_meta = strtolower((string) $order->get_meta('_eao_stripe_payment_mode'));
 			$mode = ($mode_meta === 'test') ? 'Test' : 'Live';
 			$gateway_info = array('label' => 'Stripe (EAO ' . $mode . ')');
-		}
-
-		if ($logger) {
-			$logger->info('EAORefundCompat: responding with items', [
-				'source' => 'hp-funnel-bridge',
-				'order_id' => $order_id,
-				'items' => count($order_items),
-				'shipping_items' => count($order->get_items('shipping'))
-			]);
 		}
 
 		// Ensure clean JSON (strip any prior buffered warnings from other plugins)

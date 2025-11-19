@@ -48,23 +48,20 @@ class WebhookController {
 
 		// Optional signature verification (recommended in production)
 		if (!$this->verifyStripeSignatureIfConfigured($payload)) {
-			$this->debugLog('stripe webhook signature failed');
 			return new WP_REST_Response(['ok' => false, 'reason' => 'sig_verify_failed'], 400);
 		}
 
 		$event = json_decode($payload, true);
 		if (!is_array($event) || empty($event['type'])) {
-			$this->debugLog('stripe webhook bad payload');
 			return new WP_REST_Response(['ok' => false], 400);
 		}
 		$type = (string)$event['type'];
 		$obj = isset($event['data']['object']) ? $event['data']['object'] : [];
-		$this->debugLog('stripe webhook received', ['type' => $type, 'pi' => $obj['id'] ?? null, 'livemode' => $obj['livemode'] ?? null]);
+		
 		if ($type === 'payment_intent.succeeded') {
 			return $this->onPaymentIntentSucceeded($obj);
 		}
 		if ($type === 'payment_intent.payment_failed') {
-			$this->debugLog('payment_intent.payment_failed', ['pi' => $obj['id'] ?? null]);
 			return new WP_REST_Response(['ok' => true, 'received' => $type]);
 		}
 		return new WP_REST_Response(['ok' => true, 'ignored' => $type]);
@@ -73,13 +70,11 @@ class WebhookController {
 	private function onPaymentIntentSucceeded(array $pi) {
 		$draft_id = isset($pi['metadata']['order_draft_id']) ? (string)$pi['metadata']['order_draft_id'] : '';
 		if ($draft_id === '') {
-			$this->debugLog('pi.succeeded missing draft id', ['pi' => $pi['id'] ?? null]);
 			return new WP_REST_Response(['ok' => false, 'reason' => 'no_draft'], 400);
 		}
 		$store = new OrderDraftStore();
 		$draft = $store->get($draft_id);
 		if (!$draft) {
-			$this->debugLog('pi.succeeded draft not found', ['draft_id' => $draft_id]);
 			return new WP_REST_Response(['ok' => false, 'reason' => 'draft_not_found'], 404);
 		}
 		$order = wc_create_order();
@@ -222,7 +217,6 @@ class WebhookController {
 			$order->set_status('processing');
 		}
 		$order->save();
-		$this->debugLog('order created from pi.succeeded', ['order_id' => $order->get_id(), 'items' => count($order->get_items('line_item')), 'shipping_items' => count($order->get_items('shipping')), 'pi' => $pi_id, 'charge' => $charge_id, 'mode' => $modeLabel]);
 
 		// Update Stripe PI + Charge description to include Woo order number for backoffice clarity
 		if ($pi_id !== '') {
@@ -243,21 +237,6 @@ class WebhookController {
 		return new WP_REST_Response(['ok' => true, 'order_id' => $order->get_id()]);
 	}
 
-	/**
-	 * Debug logger: writes to WooCommerce status logs (source: hp-funnel-bridge) only when WP_DEBUG or WP_DEBUG_LOG is enabled.
-	 */
-	private function debugLog(string $message, array $context = []): void {
-		if ((defined('WP_DEBUG') && WP_DEBUG) || (defined('WP_DEBUG_LOG') && WP_DEBUG_LOG)) {
-			if (function_exists('wc_get_logger')) {
-				try {
-					$logger = \wc_get_logger();
-					$logger->info($message . ' ' . wp_json_encode($context), ['source' => 'hp-funnel-bridge']);
-					return;
-				} catch (\Throwable $e) {}
-			}
-			@error_log('[hp-funnel-bridge] ' + $message . ' ' . json_encode($context));
-		}
-	}
 	/**
 	 * If webhook signing secrets are configured, verify Stripe-Signature header.
 	 * Accepts either the test or live secret (so it works across modes).
