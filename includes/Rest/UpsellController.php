@@ -69,7 +69,6 @@ class UpsellController {
 			$unit = (float)$product->get_price();
 			$unit_after = round($unit * (1 - ($upsell_percent / 100)), 2);
 			$amount += $unit_after * $qty;
-			$added_items++;
 		}
 		if ($has_override) {
 			$amount = (float)$override;
@@ -124,6 +123,7 @@ class UpsellController {
 						$item->update_meta_data('_eao_exclude_global_discount', 1);
 						$item->update_meta_data('_eao_item_discount_percent', $upsell_percent);
 						if ($upsell_charge_id !== '') { $item->update_meta_data('_hp_fb_charge_id', $upsell_charge_id); }
+						$added_items++;
 					}
 					if (method_exists($item, 'save')) { $item->save(); }
 				}
@@ -138,6 +138,7 @@ class UpsellController {
 				$item->update_meta_data('_eao_item_discount_percent', $upsell_percent);
 				if ($upsell_charge_id !== '') { $item->update_meta_data('_hp_fb_charge_id', $upsell_charge_id); }
 				$parent->add_item($item);
+				$added_items++;
 			}
 		}
 		if ($added_items === 0) {
