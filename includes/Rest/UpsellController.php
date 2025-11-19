@@ -100,10 +100,12 @@ class UpsellController {
 		}
 
 		// Attach the upsell to the original (parent) order: add products or a fee and recalc totals.
+		$upsellSubtotal = 0.0;
 		foreach ($items as $it) {
 			$qty = max(1, (int)($it['qty'] ?? 1));
 			$product = Resolver::resolveProductFromItem($it);
 			if (!$product) { continue; }
+			$upsellSubtotal += (float)$product->get_price() * $qty;
 			if (function_exists('wc_add_product_to_order')) {
 				wc_add_product_to_order($parent->get_id(), $product, $qty);
 			} else {
@@ -121,6 +123,16 @@ class UpsellController {
 			$fee->set_name($label);
 			$fee->set_total($amount);
 			$parent->add_item($fee);
+		} else {
+			// Apply upsell 15% discount as a negative fee to match checkout display
+			$upsellDiscount = round($upsellSubtotal * 0.15, 2);
+			if ($upsellDiscount > 0.0) {
+				$fee = new \WC_Order_Item_Fee();
+				$fee->set_name('Upsell discount (15%)');
+				$fee->set_amount(-1 * $upsellDiscount);
+				$fee->set_total(-1 * $upsellDiscount);
+				$parent->add_item($fee);
+			}
 		}
 		$parent->calculate_totals(false);
 

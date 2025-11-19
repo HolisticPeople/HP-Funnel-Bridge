@@ -129,16 +129,28 @@ class WebhookController {
 				}
 			}
 		}
-		// Points redemption (requires user)
+		// First totals pass to compute gross products for discount
+		$order->calculate_totals(false);
+
+		// Apply global 10% discount as a negative fee (matches checkout/totals endpoints)
+		$products_gross = (float) $order->get_subtotal();
+		$global_discount = round($products_gross * 0.10, 2);
+		if ($global_discount > 0.0) {
+			$fee = new \WC_Order_Item_Fee();
+			$fee->set_name('Global discount (10%)');
+			$fee->set_amount(-1 * $global_discount);
+			$fee->set_total(-1 * $global_discount);
+			$order->add_item($fee);
+		}
+
+		// Points redemption (requires user) — run after global discount so cap is correct
 		$points_to_redeem = isset($draft['points_to_redeem']) ? (int)$draft['points_to_redeem'] : 0;
-		// Ensure EAO YITH points helpers are available outside admin (Bridge context)
 		if ($points_to_redeem > 0 && $user && !function_exists('eao_process_yith_points_redemption')) {
 			$this->tryLoadEaoYithPoints();
 		}
 		if ($points_to_redeem > 0 && $user && function_exists('eao_process_yith_points_redemption')) {
 			$order->save(); // ensure ID before processing
 			$res = \eao_process_yith_points_redemption($order->get_id(), ['eao_points_to_redeem' => $points_to_redeem]);
-			// ignore result soft-fail; totals recalculated below
 		}
 		$order->calculate_totals(false);
 
