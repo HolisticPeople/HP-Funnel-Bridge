@@ -14,6 +14,147 @@ class EAORefundCompat {
 		if (!is_admin()) { return; }
 		// Run before EAO's own handler; we only handle Bridge orders.
 		add_action('wp_ajax_eao_payment_get_refund_data', [$this, 'maybeHandleRefundData'], 1);
+		add_action('wp_ajax_eao_payment_process_refund', [$this, 'maybeProcessRefund'], 1);
+	}
+
+	/**
+	 * Handle refund processing for Bridge orders with multiple Stripe charges.
+	 * We split the requested refund across charges using per-line meta _hp_fb_charge_id,
+	 * perform multiple Stripe refunds, then create a single wc_refund on the order.
+	 */
+	public function maybeProcessRefund(): void {
+		$logger = (function_exists('wc_get_logger') && ((defined('WP_DEBUG') && WP_DEBUG) || (defined('WP_DEBUG_LOG') && WP_DEBUG_LOG))) ? \wc_get_logger() : null;
+		$order_id = isset($_POST['order_id']) ? absint($_POST['order_id']) : 0;
+		if (!$order_id) { return; }
+		$order = wc_get_order($order_id);
+		if (!$order) { return; }
+		$is_bridge = (
+			(string) $order->get_meta('_hp_fb_stripe_payment_intent_id', true) !== '' ||
+			(string) $order->get_meta('_hp_fb_stripe_charge_id', true) !== '' ||
+			(string) $order->get_payment_method() === 'hp_fb_stripe' ||
+			(string) $order->get_meta('_hp_fb_upsell_charge_id', true) !== ''
+		);
+		if (!$is_bridge) { return; } // let EAO handle
+
+		// Parse lines payload from UI
+		$lines_json = isset($_POST['lines']) ? wp_unslash($_POST['lines']) : '[]';
+		$lines = json_decode($lines_json, true);
+		if (!is_array($lines)) { $lines = array(); }
+		$user_reason = isset($_POST['reason']) ? sanitize_text_field(wp_unslash($_POST['reason'])) : '';
+
+		// Build per-charge allocations using _hp_fb_charge_id on items; default shipping to checkout charge
+		$checkout_charge = (string) $order->get_meta('_hp_fb_stripe_charge_id', true);
+		$per_charge = array(); // charge_id => amount float
+		$amount_total = 0.0;
+		$points_total = 0;
+		$points_map = array();
+		foreach ($lines as $row) {
+			$item_id = isset($row['item_id']) ? absint($row['item_id']) : 0;
+			$money = isset($row['money']) ? floatval($row['money']) : 0.0;
+			$points = isset($row['points']) ? intval($row['points']) : 0;
+			if ($points > 0) { $points_total += $points; $points_map[$item_id] = $points; }
+			if ($item_id <= 0 || $money <= 0) { continue; }
+			$charge_for_item = $checkout_charge;
+			$it = $order->get_item($item_id);
+			if ($it) {
+				$meta_ch = (string) $it->get_meta('_hp_fb_charge_id', true);
+				if ($meta_ch !== '') { $charge_for_item = $meta_ch; }
+			}
+			if ($charge_for_item === '') { $charge_for_item = $checkout_charge; }
+			if (!isset($per_charge[$charge_for_item])) { $per_charge[$charge_for_item] = 0.0; }
+			$per_charge[$charge_for_item] += $money;
+			$amount_total += $money;
+		}
+		if ($amount_total <= 0 && $points_total <= 0) { return; }
+
+		// Stripe credentials from EAO settings
+		$stripe_mode = (string) $order->get_meta('_eao_stripe_payment_mode');
+		if ($stripe_mode !== 'test') { $stripe_mode = 'live'; }
+		$opts = get_option('eao_stripe_settings', array());
+		$secret = ($stripe_mode === 'live') ? ($opts['live_secret'] ?? '') : ($opts['test_secret'] ?? '');
+		if ($amount_total > 0 && empty($secret)) {
+			wp_send_json_error(array('message' => 'Stripe API key missing for ' . (($stripe_mode === 'live') ? 'Live' : 'Test') . ' mode.'));
+		}
+
+		// Issue Stripe refunds per charge
+		$refund_ids = array();
+		if ($amount_total > 0) {
+			$headers = array('Authorization' => 'Bearer ' . $secret, 'Content-Type' => 'application/x-www-form-urlencoded');
+			foreach ($per_charge as $charge_id => $amt) {
+				if ($amt <= 0) { continue; }
+				$rf = wp_remote_post('https://api.stripe.com/v1/refunds', array(
+					'headers' => $headers,
+					'body' => array(
+						'charge' => $charge_id,
+						'amount' => (int) round($amt * 100),
+						'reason' => 'requested_by_customer',
+						'metadata[order_id]' => $order_id
+					),
+					'timeout' => 25
+				));
+				if (is_wp_error($rf)) {
+					wp_send_json_error(array('message' => 'Stripe refund error: ' . $rf->get_error_message()));
+				}
+				$rf_body = json_decode(wp_remote_retrieve_body($rf), true);
+				if (empty($rf_body['id'])) {
+					wp_send_json_error(array('message' => 'Stripe refund failed', 'stripe' => $rf_body));
+				}
+				$refund_ids[] = (string) $rf_body['id'];
+			}
+		}
+
+		// Create a single WooCommerce refund to record the operation (no gateway call)
+		$line_items = array();
+		foreach ($lines as $row) {
+			$item_id = isset($row['item_id']) ? absint($row['item_id']) : 0;
+			$money = isset($row['money']) ? floatval($row['money']) : 0;
+			if ($item_id && $money > 0) {
+				$line_items[$item_id] = array('qty' => 0, 'refund_total' => wc_format_decimal($money, 2));
+			}
+		}
+		$reason = 'Refund via EAO (Bridge multi-charge)';
+		if ($points_total > 0) { $reason .= ' | Points to refund: ' . (int) $points_total; }
+		$user_reason = isset($_POST['reason']) ? sanitize_text_field(wp_unslash($_POST['reason'])) : '';
+		if (!empty($user_reason)) { $reason .= ' | Reason: ' . $user_reason; }
+
+		$refund = wc_create_refund(array(
+			'amount' => wc_format_decimal($amount_total, 2),
+			'reason' => $reason,
+			'order_id' => $order_id,
+			'line_items' => $line_items,
+			'refund_payment' => false,
+			'restock_items' => false
+		));
+		if (is_wp_error($refund)) {
+			wp_send_json_error(array('message' => $refund->get_error_message()));
+		}
+		if ($amount_total > 0) {
+			update_post_meta($refund->get_id(), '_hp_fb_stripe_refunds', wp_json_encode(array_values($refund_ids)));
+			update_post_meta($refund->get_id(), '_eao_refund_reference', implode(',', $refund_ids));
+			update_post_meta($refund->get_id(), '_eao_refunded_via_gateway', 'Stripe (EAO ' . (($stripe_mode === 'live') ? 'Live' : 'Test') . ')');
+		}
+
+		// Handle points restore
+		if ($points_total > 0) {
+			if (function_exists('ywpar_increase_points')) {
+				ywpar_increase_points($order->get_customer_id(), $points_total, sprintf(__('Redeemed points returned for Order #%d', 'enhanced-admin-order'), $order_id), $order_id);
+			} elseif (function_exists('ywpar_get_customer')) {
+				$cust = ywpar_get_customer($order->get_customer_id());
+				if ($cust && method_exists($cust, 'update_points')) {
+					$cust->update_points($points_total, 'order_points_return', array('order_id' => $order_id, 'description' => 'Redeemed points returned'));
+				}
+			}
+			update_post_meta($refund->get_id(), '_eao_points_refunded', (int) $points_total);
+			if (!empty($points_map)) { update_post_meta($refund->get_id(), '_eao_points_refunded_map', wp_json_encode($points_map)); }
+		}
+
+		$note = 'EAO Refund: Refund of $' . wc_format_decimal($amount_total, 2) . ' processed through Stripe (Bridge multi-charge).';
+		if (!empty($refund_ids)) { $note .= ' Stripe refunds: ' . implode(', ', $refund_ids) . '.'; }
+		$order->add_order_note($note, false, false);
+
+		// Clean buffer and return JSON to UI
+		if (function_exists('ob_get_level')) { while (ob_get_level() > 0) { @ob_end_clean(); } }
+		wp_send_json_success(array('refund_id' => $refund->get_id(), 'amount' => wc_format_decimal($amount_total, 2), 'points' => (int) $points_total));
 	}
 
 	public function maybeHandleRefundData(): void {

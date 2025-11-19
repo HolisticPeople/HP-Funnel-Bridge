@@ -166,6 +166,15 @@ class WebhookController {
 		if (!empty($draft['stripe_customer'])) {
 			$order->update_meta_data('_hp_fb_stripe_customer_id', (string)$draft['stripe_customer']);
 		}
+		// Tag all initial line items with the checkout charge id so refunds can be apportioned later
+		if ($charge_id !== '') {
+			foreach ($order->get_items('line_item') as $li) {
+				if (method_exists($li, 'update_meta_data')) {
+					$li->update_meta_data('_hp_fb_charge_id', $charge_id);
+					$li->save();
+				}
+			}
+		}
 		// Mirror EAO Stripe meta so EAO refund UI behaves like native charges
 		$livemode = !empty($pi['livemode']);
 		$eao_mode = $livemode ? 'live' : 'test';
