@@ -114,8 +114,14 @@ class TotalsController {
         }
       }
       $fees_total = 0.0;
+      $fees_excluding_points = 0.0;
       foreach ($order->get_fees() as $fee) {
-        $fees_total += (float) $fee->get_total();
+        $val = (float) $fee->get_total();
+        $fees_total += $val;
+        $name = method_exists($fee, 'get_name') ? (string)$fee->get_name() : '';
+        if (stripos($name, 'Points redemption') === false) {
+          $fees_excluding_points += $val;
+        }
       }
       $shipping_total = (float) $order->get_shipping_total();
       $grand_manual = max(0.0, $items_total_after_discounts + $fees_total + $shipping_total);
@@ -128,6 +134,8 @@ class TotalsController {
         'fees_total' => (float)$order->get_fees() ? array_sum(array_map(function($f){ return (float)$f->get_total(); }, $order->get_fees())) : 0.0,
         'global_discount' => (float)$global_discount,
         'points_discount' => (float)$pointsDiscount,
+        // Subtotal after global discount, before points (for display)
+        'discounted_subtotal' => (float) max(0.0, $items_total_after_discounts + $fees_excluding_points),
         'grand_total' => (float)$grand_manual,
 			]);
 		} finally {
