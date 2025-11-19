@@ -58,6 +58,7 @@ class UpsellController {
 		// Amount
 		$amount = 0.0;
 		$added_items = 0;
+		$upsell_percent = 15.0;
 		foreach ($items as $it) {
 			$product_id = isset($it['product_id']) ? (int)$it['product_id'] : 0;
 			$variation_id = isset($it['variation_id']) ? (int)$it['variation_id'] : 0;
@@ -65,7 +66,9 @@ class UpsellController {
 			if ($product_id <= 0) { continue; }
 			$product = wc_get_product($variation_id > 0 ? $variation_id : $product_id);
 			if (!$product) { continue; }
-			$amount += (float)$product->get_price() * $qty;
+			$unit = (float)$product->get_price();
+			$unit_after = round($unit * (1 - ($upsell_percent / 100)), 2);
+			$amount += $unit_after * $qty;
 			$added_items++;
 		}
 		if ($has_override) {
@@ -101,26 +104,37 @@ class UpsellController {
 
 		// Attach the upsell to the original (parent) order: add products or a fee and recalc totals.
 		$upsellSubtotal = 0.0;
+		$upsell_charge_id = '';
+		if (!empty($pi['latest_charge'])) { $upsell_charge_id = (string) $pi['latest_charge']; }
+		if (!$upsell_charge_id && !empty($pi['charges']['data'][0]['id'])) { $upsell_charge_id = (string) $pi['charges']['data'][0]['id']; }
 		foreach ($items as $it) {
 			$qty = max(1, (int)($it['qty'] ?? 1));
 			$product = Resolver::resolveProductFromItem($it);
 			if (!$product) { continue; }
-			$upsellSubtotal += (float)$product->get_price() * $qty;
+			$unit = (float)$product->get_price();
+			$unit_after = round($unit * (1 - ($upsell_percent / 100)), 2);
+			$upsellSubtotal += $unit_after * $qty;
 			if (function_exists('wc_add_product_to_order')) {
 				$item = wc_add_product_to_order($parent->get_id(), $product, $qty);
-				if ($item && is_object($item) && method_exists($item, 'update_meta_data')) {
-					$item->update_meta_data('_eao_exclude_global_discount', 1);
-					$item->update_meta_data('_eao_item_discount_percent', 15);
-					$item->save();
+				if ($item && is_object($item)) {
+					if (method_exists($item, 'set_total')) { $item->set_total($unit_after * $qty); }
+					if (method_exists($item, 'set_subtotal')) { $item->set_subtotal($unit_after * $qty); }
+					if (method_exists($item, 'update_meta_data')) {
+						$item->update_meta_data('_eao_exclude_global_discount', 1);
+						$item->update_meta_data('_eao_item_discount_percent', $upsell_percent);
+						if ($upsell_charge_id !== '') { $item->update_meta_data('_hp_fb_charge_id', $upsell_charge_id); }
+					}
+					if (method_exists($item, 'save')) { $item->save(); }
 				}
 			} else {
 				$item = new \WC_Order_Item_Product();
 				$item->set_product($product);
 				$item->set_quantity($qty);
-				$item->set_subtotal($product->get_price() * $qty);
-				$item->set_total($product->get_price() * $qty);
+				$item->set_subtotal($unit_after * $qty);
+				$item->set_total($unit_after * $qty);
 				$item->update_meta_data('_eao_exclude_global_discount', 1);
-				$item->update_meta_data('_eao_item_discount_percent', 15);
+				$item->update_meta_data('_eao_item_discount_percent', $upsell_percent);
+				if ($upsell_charge_id !== '') { $item->update_meta_data('_hp_fb_charge_id', $upsell_charge_id); }
 				$parent->add_item($item);
 			}
 		}
@@ -130,16 +144,6 @@ class UpsellController {
 			$fee->set_name($label);
 			$fee->set_total($amount);
 			$parent->add_item($fee);
-		} else {
-			// Apply upsell 15% discount as a negative fee to match checkout display
-			$upsellDiscount = round($upsellSubtotal * 0.15, 2);
-			if ($upsellDiscount > 0.0) {
-				$fee = new \WC_Order_Item_Fee();
-				$fee->set_name('Upsell discount (15%)');
-				$fee->set_amount(-1 * $upsellDiscount);
-				$fee->set_total(-1 * $upsellDiscount);
-				$parent->add_item($fee);
-			}
 		}
 		$parent->calculate_totals(false);
 
