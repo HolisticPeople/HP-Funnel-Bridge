@@ -141,6 +141,8 @@ class WebhookController {
 			$fee->set_amount(-1 * $global_discount);
 			$fee->set_total(-1 * $global_discount);
 			$order->add_item($fee);
+			// Persist EAO global discount percent so the admin UI shows 10%
+			$order->update_meta_data('_eao_global_product_discount_percent', 10);
 		}
 
 		// Points redemption (requires user) — run after global discount so cap is correct

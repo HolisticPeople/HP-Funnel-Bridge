@@ -107,13 +107,20 @@ class UpsellController {
 			if (!$product) { continue; }
 			$upsellSubtotal += (float)$product->get_price() * $qty;
 			if (function_exists('wc_add_product_to_order')) {
-				wc_add_product_to_order($parent->get_id(), $product, $qty);
+				$item = wc_add_product_to_order($parent->get_id(), $product, $qty);
+				if ($item && is_object($item) && method_exists($item, 'update_meta_data')) {
+					$item->update_meta_data('_eao_exclude_global_discount', 1);
+					$item->update_meta_data('_eao_item_discount_percent', 15);
+					$item->save();
+				}
 			} else {
 				$item = new \WC_Order_Item_Product();
 				$item->set_product($product);
 				$item->set_quantity($qty);
 				$item->set_subtotal($product->get_price() * $qty);
 				$item->set_total($product->get_price() * $qty);
+				$item->update_meta_data('_eao_exclude_global_discount', 1);
+				$item->update_meta_data('_eao_item_discount_percent', 15);
 				$parent->add_item($item);
 			}
 		}
