@@ -2,7 +2,7 @@
 /**
  * Plugin Name:       HP Funnel Bridge
  * Description:       Multi‑funnel bridge exposing REST endpoints for checkout, shipping rates, totals, and one‑click upsells. Reuses EAO (Stripe keys, ShipStation, YITH points) without modifying it.
- * Version:           0.2.57
+ * Version:           0.2.58
  * Requires at least: 6.0
  * Requires PHP:      7.4
  * Author:            Holistic People
@@ -15,7 +15,7 @@ if (!defined('ABSPATH')) {
 	exit;
 }
 
-define('HP_FB_PLUGIN_VERSION', '0.2.57');
+define('HP_FB_PLUGIN_VERSION', '0.2.58');
 define('HP_FB_PLUGIN_FILE', __FILE__);
 define('HP_FB_PLUGIN_DIR', plugin_dir_path(__FILE__));
 define('HP_FB_PLUGIN_URL', plugin_dir_url(__FILE__));
@@ -213,7 +213,7 @@ add_action('template_redirect', function () {
 	$isTest = (strpos($pubVal, '_test_') !== false);
 	// Dark theme styling to better match modern funnels, with per-funnel overrides
 	echo '<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>HP Funnel Payment</title><style>
-	body{margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;background:radial-gradient(circle at top,'.esc_html($accent_color).' 0,'.esc_html($bg_color).' 45%,'.esc_html($bg_color).' 100%);font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;color:#e5e7eb;}
+	body{margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;background:'.esc_html($bg_color).';font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;color:#e5e7eb;}
 	#checkout{width:100%;max-width:520px;background:'.esc_html($card_color).';border-radius:18px;padding:24px 24px 20px 24px;box-shadow:0 24px 60px rgba(15,23,42,0.9);border:1px solid rgba(148,163,184,0.3);}
 	h2{margin:0 0 8px 0;font-size:22px;font-weight:700;letter-spacing:.01em;color:#f9fafb;display:flex;align-items:center;gap:8px;}
 	#amount{margin:4px 0 18px 0;font-size:14px;font-weight:500;color:#eab308;}
