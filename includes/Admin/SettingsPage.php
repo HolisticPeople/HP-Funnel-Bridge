@@ -373,7 +373,8 @@ class SettingsPage {
 		?>
 		<div class="wrap hp-fb-funnel-config">
 			<h1>HP Funnel: <?php echo esc_html($name); ?></h1>
-			<p style="margin: -6px 0 10px; color:#666;">Funnel ID: <code><?php echo esc_html($funnel_id); ?></code></p>
+			<p style="margin: -6px 0 4px; color:#666;">Funnel ID: <code><?php echo esc_html($funnel_id); ?></code></p>
+			<p style="margin: 0 0 10px; color:#666;">Bridge version <?php echo esc_html( defined('HP_FB_PLUGIN_VERSION') ? HP_FB_PLUGIN_VERSION : '' ); ?></p>
 			<p><a href="<?php echo esc_url( admin_url('options-general.php?page=hp-funnel-bridge') ); ?>" class="button">&larr; Back to Funnel Registry</a></p>
 
 			<hr />
@@ -559,8 +560,10 @@ class SettingsPage {
 			// Product search
 			const searchInput = document.getElementById('hp-fb-product-search');
 			const resultsBox = document.getElementById('hp-fb-product-search-results');
+			let currentSearchResults = [];
 			function renderSearchResults(items){
 				if (!resultsBox) return;
+				currentSearchResults = Array.isArray(items) ? items.slice() : [];
 				if (!items || !items.length) { resultsBox.innerHTML = '<p class=\"description\">No products found.</p>'; return; }
 				const ul = document.createElement('ul');
 				ul.style.listStyle = 'disc';
@@ -573,31 +576,6 @@ class SettingsPage {
 				});
 				resultsBox.innerHTML = '';
 				resultsBox.appendChild(ul);
-				resultsBox.addEventListener('click', function(e){
-					const t = e.target;
-					if (t && t.classList.contains('hp-fb-add-product')) {
-						const pid = parseInt(t.getAttribute('data-product_id') || '0', 10);
-						const prod = items.find(function(x){ return parseInt(x.id,10) === pid; });
-						if (!prod) return;
-						// Avoid duplicates
-						if (currentRows.some(function(r){ return parseInt(r.product_id,10) === pid; })) {
-							showStatus('Product already added.', true);
-							return;
-						}
-						currentRows.push({
-							product_id: pid,
-							name: prod.name,
-							sku: prod.sku || '',
-							image: prod.image || '',
-							price: prod.price || 0,
-							role: 'base',
-							exclude_global_discount: 0,
-							item_discount_percent: 0,
-						});
-						renderRows(currentRows);
-						showStatus('Product added. Don\'t forget to Save.', false);
-					}
-				}, { once: true });
 			}
 			let searchTimer = null;
 			function performSearch(){
@@ -621,6 +599,32 @@ class SettingsPage {
 					.catch(function(){
 						renderSearchResults([]);
 					});
+			}
+			if (resultsBox) {
+				resultsBox.addEventListener('click', function(e){
+					const t = e.target;
+					if (t && t.classList.contains('hp-fb-add-product')) {
+						const pid = parseInt(t.getAttribute('data-product_id') || '0', 10);
+						const prod = currentSearchResults.find(function(x){ return parseInt(x.id,10) === pid; });
+						if (!prod) return;
+						if (currentRows.some(function(r){ return parseInt(r.product_id,10) === pid; })) {
+							showStatus('Product already added.', true);
+							return;
+						}
+						currentRows.push({
+							product_id: pid,
+							name: prod.name,
+							sku: prod.sku || '',
+							image: prod.image || '',
+							price: prod.price || 0,
+							role: 'base',
+							exclude_global_discount: 0,
+							item_discount_percent: 0,
+						});
+						renderRows(currentRows);
+						showStatus('Product added. Don\'t forget to Save.', false);
+					}
+				});
 			}
 			if (searchInput) {
 				searchInput.addEventListener('keyup', function(e){
