@@ -432,6 +432,39 @@ class SettingsPage {
 
 			function fmt(v){ return (typeof v === 'number' && isFinite(v)) ? v.toFixed(2) : ''; }
 
+			function syncRowUI(row, tr){
+				if (!tr || !row) return;
+				const globalInput = document.getElementById('hp-fb-global-discount');
+				const globalDisc = parseFloat(globalInput && globalInput.value ? globalInput.value : '0') || 0;
+				const excludeCbx = tr.querySelector('.hp-fb-exclude-gd');
+				const isExcluded = !!(excludeCbx && excludeCbx.checked);
+				const discInput = tr.querySelector('.hp-fb-item-disc');
+				const discSpan = tr.querySelector('.hp-fb-disc-display');
+				const priceSpan = tr.querySelector('.hp-fb-disc-price-display');
+				const discPriceInput = tr.querySelector('.hp-fb-discounted-input');
+				let percent = isExcluded ? (parseFloat(row.item_discount_percent || 0) || 0) : globalDisc;
+				if (!isFinite(percent)) percent = 0;
+				row.item_discount_percent = percent;
+				if (discInput) discInput.value = String(percent);
+				const price = parseFloat(row.price || 0) || 0;
+				const discounted = price > 0 && percent > 0 ? price * (percent >= 100 ? 0 : (1 - percent/100)) : price;
+				if (discPriceInput) discPriceInput.value = fmt(discounted);
+				if (discSpan) discSpan.textContent = percent.toFixed(1) + '%';
+				if (priceSpan) priceSpan.textContent = '$ ' + fmt(discounted);
+				// Toggle editable vs display depending on exclude flag
+				if (isExcluded) {
+					if (discInput) discInput.style.display = 'inline-block';
+					if (discPriceInput) discPriceInput.style.display = 'inline-block';
+					if (discSpan) discSpan.style.display = 'none';
+					if (priceSpan) priceSpan.style.display = 'none';
+				} else {
+					if (discInput) discInput.style.display = 'none';
+					if (discPriceInput) discPriceInput.style.display = 'none';
+					if (discSpan) discSpan.style.display = 'inline';
+					if (priceSpan) priceSpan.style.display = 'inline';
+				}
+			}
+
 			function renderRows(rows){
 				if (!body) return;
 				body.innerHTML = '';
@@ -454,13 +487,20 @@ class SettingsPage {
 						'</td>' +
 						'<td style=\"text-align:center;\"><input type=\"checkbox\" class=\"hp-fb-exclude-gd\"'+(r.exclude_global_discount ? ' checked' : '')+' /></td>' +
 						'<td style=\"text-align:right;\">$ '+ fmt(price) +'</td>' +
-						'<td style=\"text-align:center;\"><input type=\"number\" step=\"0.1\" min=\"0\" max=\"100\" class=\"hp-fb-item-disc\" value=\"'+ String(disc) +'\" style=\"width:80px;\" /></td>' +
-						'<td style=\"text-align:right;\" class=\"hp-fb-discounted-cell\">$ '+ fmt(discounted) +'</td>' +
+						'<td style=\"text-align:center;\">' +
+							'<span class=\"hp-fb-disc-display\"></span>' +
+							'<input type=\"number\" step=\"0.1\" min=\"0\" max=\"100\" class=\"hp-fb-item-disc\" value=\"'+ String(disc) +'\" style=\"width:80px;display:none;\" />' +
+						'</td>' +
+						'<td style=\"text-align:right;\" class=\"hp-fb-discounted-cell\">' +
+							'<span class=\"hp-fb-disc-price-display\"></span>' +
+							'<input type=\"number\" step=\"0.01\" min=\"0\" class=\"hp-fb-discounted-input\" value=\"'+ fmt(discounted) +'\" style=\"width:90px;text-align:right;display:none;\" />' +
+						'</td>' +
 						'<td><button type=\"button\" class=\"button-link hp-fb-remove-row\">Remove</button>' +
 							'<input type=\"hidden\" class=\"hp-fb-product-id\" value=\"'+ String(r.product_id) +'\" />' +
 							'<input type=\"hidden\" class=\"hp-fb-sku\" value=\"'+ String(r.sku || '') +'\" />' +
 						'</td>';
 					body.appendChild(tr);
+					syncRowUI(r, tr);
 				});
 			}
 
@@ -490,14 +530,20 @@ class SettingsPage {
 						currentRows[idx].role = t.value;
 					} else if (t.classList.contains('hp-fb-exclude-gd')) {
 						currentRows[idx].exclude_global_discount = t.checked ? 1 : 0;
+						syncRowUI(currentRows[idx], tr);
 					} else if (t.classList.contains('hp-fb-item-disc')) {
 						const v = parseFloat(t.value || '0') || 0;
 						currentRows[idx].item_discount_percent = v;
-						// Recompute discounted cell
+						syncRowUI(currentRows[idx], tr);
+					} else if (t.classList.contains('hp-fb-discounted-input')) {
 						const price = parseFloat(currentRows[idx].price || 0) || 0;
-						const discounted = price > 0 && v > 0 ? price * (1 - v/100) : price;
-						const cell = tr.querySelector('.hp-fb-discounted-cell');
-						if (cell) cell.textContent = '$ ' + fmt(discounted);
+						const discounted = parseFloat(t.value || '0') || 0;
+						let percent = 0;
+						if (price > 0) {
+							percent = Math.max(0, Math.min(100, ((price - discounted) / price) * 100));
+						}
+						currentRows[idx].item_discount_percent = percent;
+						syncRowUI(currentRows[idx], tr);
 					}
 				});
 			}
@@ -508,27 +554,15 @@ class SettingsPage {
 				statusEl.style.color = isError ? '#c00' : '#008000';
 			}
 
-			// When global discount changes, immediately apply it to non-excluded items
-			// and recompute their discounted price.
+			// When global discount changes, immediately refresh all row displays
 			const globalDiscInput = document.getElementById('hp-fb-global-discount');
 			if (globalDiscInput) {
 				globalDiscInput.addEventListener('input', function(){
-					const v = parseFloat(globalDiscInput.value || '0') || 0;
 					const trs = body ? Array.prototype.slice.call(body.querySelectorAll('tr')) : [];
 					trs.forEach(function(tr){
-						const excludeCbx = tr.querySelector('.hp-fb-exclude-gd');
-						if (excludeCbx && excludeCbx.checked) { return; }
-						const discInput = tr.querySelector('.hp-fb-item-disc');
-						if (discInput) {
-							discInput.value = String(v);
-						}
 						const idx = parseInt(tr.getAttribute('data-index') || '-1', 10);
 						if (idx >= 0 && currentRows[idx]) {
-							currentRows[idx].item_discount_percent = v;
-							const price = parseFloat(currentRows[idx].price || 0) || 0;
-							const discounted = price > 0 && v > 0 ? price * (1 - v/100) : price;
-							const cell = tr.querySelector('.hp-fb-discounted-cell');
-							if (cell) cell.textContent = '$ ' + fmt(discounted);
+							syncRowUI(currentRows[idx], tr);
 						}
 					});
 				});
