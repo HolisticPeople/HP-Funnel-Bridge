@@ -189,6 +189,17 @@ class FunnelAjax {
 				];
 			}
 		}
+
+		// Optional hosted payment page style overrides
+		$style_in = isset($payload['payment_style']) && is_array($payload['payment_style']) ? $payload['payment_style'] : [];
+		$accent = isset($style_in['accent_color']) ? sanitize_hex_color((string)$style_in['accent_color']) : '';
+		$bg     = isset($style_in['background_color']) ? sanitize_hex_color((string)$style_in['background_color']) : '';
+		$card   = isset($style_in['card_color']) ? sanitize_hex_color((string)$style_in['card_color']) : '';
+		$style  = [];
+		if ($accent !== '') { $style['accent_color'] = $accent; }
+		if ($bg !== '')     { $style['background_color'] = $bg; }
+		if ($card !== '')   { $style['card_color'] = $card; }
+
 		$opts = get_option('hp_fb_settings', []);
 		if (!isset($opts['funnel_configs']) || !is_array($opts['funnel_configs'])) {
 			$opts['funnel_configs'] = [];
@@ -196,6 +207,7 @@ class FunnelAjax {
 		$opts['funnel_configs'][$funnel_id] = [
 			'global_discount_percent' => $global,
 			'products' => $products,
+			'payment_style' => $style,
 		];
 		update_option('hp_fb_settings', $opts);
 		wp_send_json_success();

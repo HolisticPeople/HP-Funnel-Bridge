@@ -46,18 +46,20 @@
     var cs = cfg.getAttribute("data-cs") || "";
     var ret = cfg.getAttribute("data-ret") || "";
     var succ = cfg.getAttribute("data-succ") || "";
+    var accent = cfg.getAttribute("data-accent") || "#eab308";
+    var bg = cfg.getAttribute("data-bg") || "#020617";
     bindCopy();
     var msg = document.getElementById("messages");
     try {
       var stripe = window.Stripe(pub);
-      // Dark appearance to better blend with funnel themes
+      // Dark appearance to better blend with funnel themes, per-funnel accent/bg
       var elements = stripe.elements({
         clientSecret: cs,
         appearance: {
           theme: "night",
           variables: {
-            colorPrimary: "#eab308",
-            colorBackground: "#020617",
+            colorPrimary: accent,
+            colorBackground: bg,
             colorText: "#e5e7eb",
             colorTextSecondary: "#9ca3af",
             colorDanger: "#f97373",

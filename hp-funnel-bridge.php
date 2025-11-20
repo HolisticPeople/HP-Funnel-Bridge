@@ -200,15 +200,24 @@ add_action('template_redirect', function () {
 	$cs_js = esc_js($cs);
 	// Build a valid absolute return URL for Stripe (must be https)
 	$here = esc_url(home_url('/'));
+	// Optional per-funnel hosted payment styling
+	$fid = isset($_GET['fid']) ? sanitize_key((string) $_GET['fid']) : '';
+	$opts = get_option('hp_fb_settings', []);
+	$cfgs = isset($opts['funnel_configs']) && is_array($opts['funnel_configs']) ? $opts['funnel_configs'] : [];
+	$style_cfg = ($fid && isset($cfgs[$fid]['payment_style']) && is_array($cfgs[$fid]['payment_style'])) ? $cfgs[$fid]['payment_style'] : [];
+	$accent_color = isset($style_cfg['accent_color']) ? sanitize_hex_color($style_cfg['accent_color']) : '#eab308';
+	$bg_color     = isset($style_cfg['background_color']) ? sanitize_hex_color($style_cfg['background_color']) : '#020617';
+	$card_color   = isset($style_cfg['card_color']) ? sanitize_hex_color($style_cfg['card_color']) : '#0f172a';
+
 	// Determine badge purely from publishable key; do not rely on global env
 	$isTest = (strpos($pubVal, '_test_') !== false);
-	// Dark theme styling to better match modern funnels (Fasting Kit / Illumodine)
+	// Dark theme styling to better match modern funnels, with per-funnel overrides
 	echo '<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>HP Funnel Payment</title><style>
-	body{margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;background:radial-gradient(circle at top,#3b0764 0,#020617 45%,#020617 100%);font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;color:#e5e7eb;}
-	#checkout{width:100%;max-width:520px;background:rgba(15,23,42,0.96);border-radius:18px;padding:24px 24px 20px 24px;box-shadow:0 24px 60px rgba(15,23,42,0.9);border:1px solid rgba(148,163,184,0.3);}
+	body{margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;background:radial-gradient(circle at top,'.esc_html($accent_color).' 0,'.esc_html($bg_color).' 45%,'.esc_html($bg_color).' 100%);font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;color:#e5e7eb;}
+	#checkout{width:100%;max-width:520px;background:'.esc_html($card_color).';border-radius:18px;padding:24px 24px 20px 24px;box-shadow:0 24px 60px rgba(15,23,42,0.9);border:1px solid rgba(148,163,184,0.3);}
 	h2{margin:0 0 8px 0;font-size:22px;font-weight:700;letter-spacing:.01em;color:#f9fafb;display:flex;align-items:center;gap:8px;}
 	#amount{margin:4px 0 18px 0;font-size:14px;font-weight:500;color:#eab308;}
-	button#pay{width:100%;margin-top:16px;padding:12px 16px;border-radius:999px;border:none;background:linear-gradient(90deg,#f97316,#eab308);color:#0f172a;font-weight:700;font-size:15px;cursor:pointer;box-shadow:0 0 24px rgba(234,179,8,0.45);transition:opacity .18s,transform .18s,box-shadow .18s;}
+	button#pay{width:100%;margin-top:16px;padding:12px 16px;border-radius:999px;border:none;background:linear-gradient(90deg,'.esc_html($accent_color).','.esc_html($accent_color).');color:#0f172a;font-weight:700;font-size:15px;cursor:pointer;box-shadow:0 0 24px rgba(234,179,8,0.45);transition:opacity .18s,transform .18s,box-shadow .18s;}
 	button#pay:disabled{opacity:.5;cursor:default;box-shadow:none;}
 	button#pay:not(:disabled):hover{opacity:.95;transform:translateY(-1px);box-shadow:0 0 30px rgba(234,179,8,0.75);}
 	#messages{margin-top:10px;font-size:13px;color:#fecaca;min-height:18px;}
@@ -244,9 +253,11 @@ add_action('template_redirect', function () {
 	$cs_e = esc_attr($cs);
 	$here_e = esc_attr($here);
 	$succ_e = esc_attr($succ_norm);
+	$accent_e = esc_attr($accent_color);
+	$bg_e = esc_attr($bg_color);
 	echo '<div id="element"></div><div style="margin-top:12px;"><button id="pay" disabled>Pay</button></div><div id="messages"></div></div>';
 	// Pass config via data attributes and load external script to avoid inline parsing issues
-	echo '<div id="hp-fb-config" data-pub="' . $pub_e . '" data-cs="' . $cs_e . '" data-ret="' . $here_e . '" data-succ="' . $succ_e . '"></div>';
+	echo '<div id="hp-fb-config" data-pub="' . $pub_e . '" data-cs="' . $cs_e . '" data-ret="' . $here_e . '" data-succ="' . $succ_e . '" data-accent="' . $accent_e . '" data-bg="' . $bg_e . '"></div>';
 	echo '<script src="' . esc_url(HP_FB_PLUGIN_URL . 'assets/confirm.js?v=' . rawurlencode(HP_FB_PLUGIN_VERSION)) . '"></script></body></html>';
 	exit;
 });

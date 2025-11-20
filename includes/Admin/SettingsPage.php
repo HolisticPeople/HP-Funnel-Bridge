@@ -334,6 +334,10 @@ class SettingsPage {
 		$name = isset($funnel['name']) ? (string)$funnel['name'] : $funnel_id;
 		$config = isset($cfgs[$funnel_id]) && is_array($cfgs[$funnel_id]) ? $cfgs[$funnel_id] : [];
 		$global_disc = isset($config['global_discount_percent']) ? (float)$config['global_discount_percent'] : 0.0;
+		$style_cfg = isset($config['payment_style']) && is_array($config['payment_style']) ? $config['payment_style'] : [];
+		$style_accent = isset($style_cfg['accent_color']) ? (string)$style_cfg['accent_color'] : '#eab308';
+		$style_bg     = isset($style_cfg['background_color']) ? (string)$style_cfg['background_color'] : '#020617';
+		$style_card   = isset($style_cfg['card_color']) ? (string)$style_cfg['card_color'] : '#0f172a';
 		$products_cfg = isset($config['products']) && is_array($config['products']) ? $config['products'] : [];
 		// Preload product data for existing rows.
 		$rows = [];
@@ -388,6 +392,32 @@ class SettingsPage {
 					<td>
 						<input type="number" step="0.1" min="0" max="100" id="hp-fb-global-discount" value="<?php echo esc_attr($global_disc); ?>" />
 						<p class="description">Optional global discount applied to non-excluded products for this funnel. Leave at 0 for no global discount.</p>
+					</td>
+				</tr>
+			</table>
+
+			<h3>Hosted payment page style</h3>
+			<p class="description">Customize the hosted Stripe payment step for this funnel. These colors affect the background, card, and primary button around the Payment Element.</p>
+			<table class="form-table">
+				<tr>
+					<th scope="row">Background color</th>
+					<td>
+						<input type="text" id="hp-fb-pay-bg" value="<?php echo esc_attr($style_bg); ?>" class="regular-text" />
+						<p class="description">Main page background (hex), e.g. <code>#020617</code>.</p>
+					</td>
+				</tr>
+				<tr>
+					<th scope="row">Card color</th>
+					<td>
+						<input type="text" id="hp-fb-pay-card" value="<?php echo esc_attr($style_card); ?>" class="regular-text" />
+						<p class="description">Payment card background (hex), e.g. <code>#0f172a</code>.</p>
+					</td>
+				</tr>
+				<tr>
+					<th scope="row">Accent color</th>
+					<td>
+						<input type="text" id="hp-fb-pay-accent" value="<?php echo esc_attr($style_accent); ?>" class="regular-text" />
+						<p class="description">Accent / button color (hex), e.g. <code>#eab308</code>.</p>
 					</td>
 				</tr>
 			</table>
@@ -572,6 +602,9 @@ class SettingsPage {
 			if (saveBtn) {
 				saveBtn.addEventListener('click', function(){
 					const globalDisc = parseFloat(document.getElementById('hp-fb-global-discount').value || '0') || 0;
+					const payBg = (document.getElementById('hp-fb-pay-bg') || {}).value || '';
+					const payCard = (document.getElementById('hp-fb-pay-card') || {}).value || '';
+					const payAccent = (document.getElementById('hp-fb-pay-accent') || {}).value || '';
 					// Refresh rows from DOM in case indexes shifted
 					const trs = body ? Array.prototype.slice.call(body.querySelectorAll('tr')) : [];
 					currentRows = trs.map(function(tr){
@@ -596,6 +629,11 @@ class SettingsPage {
 						nonce: nonce,
 						global_discount_percent: globalDisc,
 						products: currentRows,
+						payment_style: {
+							background_color: payBg,
+							card_color: payCard,
+							accent_color: payAccent,
+						},
 					};
 					fetch(ajaxurl + '?action=hp_fb_save_funnel_config', {
 						method: 'POST',
