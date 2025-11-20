@@ -2,7 +2,7 @@
 /**
  * Plugin Name:       HP Funnel Bridge
  * Description:       Multi‑funnel bridge exposing REST endpoints for checkout, shipping rates, totals, and one‑click upsells. Reuses EAO (Stripe keys, ShipStation, YITH points) without modifying it.
- * Version:           0.2.58
+ * Version:           0.2.59
  * Requires at least: 6.0
  * Requires PHP:      7.4
  * Author:            Holistic People
@@ -15,7 +15,7 @@ if (!defined('ABSPATH')) {
 	exit;
 }
 
-define('HP_FB_PLUGIN_VERSION', '0.2.58');
+define('HP_FB_PLUGIN_VERSION', '0.2.59');
 define('HP_FB_PLUGIN_FILE', __FILE__);
 define('HP_FB_PLUGIN_DIR', plugin_dir_path(__FILE__));
 define('HP_FB_PLUGIN_URL', plugin_dir_url(__FILE__));
@@ -211,6 +211,12 @@ add_action('template_redirect', function () {
 
 	// Determine badge purely from publishable key; do not rely on global env
 	$isTest = (strpos($pubVal, '_test_') !== false);
+	// Avoid any caching on the hosted payment page so style changes apply immediately
+	if (!headers_sent()) {
+		header('Cache-Control: no-store, no-cache, must-revalidate, max-age=0');
+		header('Pragma: no-cache');
+		header('Expires: 0');
+	}
 	// Dark theme styling to better match modern funnels, with per-funnel overrides
 	echo '<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>HP Funnel Payment</title><style>
 	body{margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;background:'.esc_html($bg_color).';font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;color:#e5e7eb;}
