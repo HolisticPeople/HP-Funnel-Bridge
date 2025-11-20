@@ -2,7 +2,7 @@
 /**
  * Plugin Name:       HP Funnel Bridge
  * Description:       Multi‑funnel bridge exposing REST endpoints for checkout, shipping rates, totals, and one‑click upsells. Reuses EAO (Stripe keys, ShipStation, YITH points) without modifying it.
- * Version:           0.2.51
+ * Version:           0.2.52
  * Requires at least: 6.0
  * Requires PHP:      7.4
  * Author:            Holistic People
@@ -15,7 +15,7 @@ if (!defined('ABSPATH')) {
 	exit;
 }
 
-define('HP_FB_PLUGIN_VERSION', '0.2.51');
+define('HP_FB_PLUGIN_VERSION', '0.2.52');
 define('HP_FB_PLUGIN_FILE', __FILE__);
 define('HP_FB_PLUGIN_DIR', plugin_dir_path(__FILE__));
 define('HP_FB_PLUGIN_URL', plugin_dir_url(__FILE__));
@@ -208,12 +208,10 @@ add_action('template_redirect', function () {
 	}
 	// Server-side robust succ extraction and normalization
 	$succ_in = isset($_GET['succ']) ? (string) $_GET['succ'] : '';
+	// Handle double encoding if necessary, but also trust URL as is if valid
 	$succ_norm = $succ_in;
-	// Decode up to twice (handles encodeURIComponent + server re-encoding)
-	for ($i = 0; $i < 2; $i++) {
-		$dec = rawurldecode($succ_norm);
-		if ($dec === $succ_norm) { break; }
-		$succ_norm = $dec;
+	if (strpos($succ_norm, '%') !== false) {
+		$succ_norm = rawurldecode($succ_norm);
 	}
 	// Validate scheme
 	if ($succ_norm !== '') {

@@ -106,6 +106,13 @@ class WebhookController {
 			}
 			$added_items++;
 		}
+
+		// Illumodine value‑pack: for every 2oz bottle purchased, append a FREE 0.5oz bottle line
+		// with 100% discount so the Woo order mirrors the marketing offer while totals stay intact.
+		$funnel_id = isset($draft['funnel_id']) ? (string) $draft['funnel_id'] : 'default';
+		if ($funnel_id === 'illumodine') {
+			$this->appendIllumodineFreeBottles($order, (array) $draft['items']);
+		}
 		// Address
 		$this->applyAddress($order, 'billing', array_merge((array)$draft['shipping_address'], ['email' => $email]));
 		$this->applyAddress($order, 'shipping', (array)$draft['shipping_address']);
@@ -128,7 +135,7 @@ class WebhookController {
 		// First totals pass so WooCommerce has a baseline before we apply discounts
 		$order->calculate_totals(false);
 
-		$funnel_id = isset($draft['funnel_id']) ? (string) $draft['funnel_id'] : 'default';
+		// Now apply per-funnel discount configuration
 		$fConfig = FunnelConfig::get($funnel_id);
 		$global_percent = (float)$fConfig['global_discount_percent'];
 
@@ -389,6 +396,69 @@ class WebhookController {
 				$order->{$method}((string)$addr[$key]);
 			}
 		}
+	}
+
+	/**
+	 * Illumodine special: for every value‑pack (2 fl oz) purchased, append a FREE 0.5oz bottle
+	 * line item with 100% discount so that the WooCommerce / EAO order clearly shows the bonus.
+	 *
+	 * This does not change the charged amount – the free bottle has subtotal set to MSRP and
+	 * total set to 0, recorded as a per‑item 100% discount.
+	 *
+	 * @param \WC_Order $order
+	 * @param array     $draftItems The original draft items payload (from checkout)
+	 */
+	private function appendIllumodineFreeBottles($order, array $draftItems): void {
+		if (!function_exists('wc_get_product_id_by_sku') || !method_exists($order, 'add_item')) {
+			return;
+		}
+
+		// Count how many value‑pack (2oz) bottles were purchased (SKU HG-Illum2 from config)
+		$valuePackSku = 'HG-Illum2';
+		$freeSku      = 'HG-Illum05';
+		$freeQty      = 0;
+
+		foreach ($draftItems as $it) {
+			if (!is_array($it)) { continue; }
+			$sku = isset($it['sku']) ? (string) $it['sku'] : '';
+			if ($sku === $valuePackSku) {
+				$qty = isset($it['qty']) ? (int) $it['qty'] : 1;
+				if ($qty > 0) {
+					$freeQty += $qty;
+				}
+			}
+		}
+
+		if ($freeQty <= 0) {
+			return;
+		}
+
+		$freeProductId = wc_get_product_id_by_sku($freeSku);
+		if (!$freeProductId) {
+			return;
+		}
+		$prod = wc_get_product($freeProductId);
+		if (!$prod) {
+			return;
+		}
+
+		$msrp = (float) $prod->get_regular_price();
+		if ($msrp <= 0) {
+			$msrp = (float) $prod->get_price();
+		}
+
+		$item = new \WC_Order_Item_Product();
+		$item->set_product($prod);
+		$item->set_quantity($freeQty);
+		$item->set_subtotal($msrp * $freeQty);
+		$item->set_total(0.0);
+
+		// Mark as 100% discounted and excluded from any global discount.
+		$item->update_meta_data('_eao_exclude_global_discount', '1');
+		$item->update_meta_data('_eao_item_discount_percent', 100.0);
+
+		$order->add_item($item);
+		$item->save();
 	}
 }
 
