@@ -50,7 +50,21 @@
     var msg = document.getElementById("messages");
     try {
       var stripe = window.Stripe(pub);
-      var elements = stripe.elements({ clientSecret: cs });
+      // Dark appearance to better blend with funnel themes
+      var elements = stripe.elements({
+        clientSecret: cs,
+        appearance: {
+          theme: "night",
+          variables: {
+            colorPrimary: "#eab308",
+            colorBackground: "#020617",
+            colorText: "#e5e7eb",
+            colorTextSecondary: "#9ca3af",
+            colorDanger: "#f97373",
+            borderRadius: "12px",
+          },
+        },
+      });
       var paymentElement = elements.create("payment");
       paymentElement.mount("#element");
       var btn = document.getElementById("pay");
