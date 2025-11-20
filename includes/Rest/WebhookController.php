@@ -8,6 +8,7 @@ use WP_Error;
 use WC_Order_Item_Product;
 use WC_Order_Item_Shipping;
 use HP_FB\Util\Resolver;
+use HP_FB\Util\FunnelConfig;
 
 if (!defined('ABSPATH')) { exit; }
 
@@ -127,35 +128,71 @@ class WebhookController {
 		// First totals pass so WooCommerce has a baseline before we apply discounts
 		$order->calculate_totals(false);
 
-		// Apply optional global discount by adjusting line item totals (no separate fee),
-		// mirroring how EAO admin orders persist global discounts. Currently only the
-		// fasting kit funnel uses a global 10% discount.
 		$funnel_id = isset($draft['funnel_id']) ? (string) $draft['funnel_id'] : 'default';
-		$global_percent = ($funnel_id === 'fastingkit') ? 10.0 : 0.0;
+		$fConfig = FunnelConfig::get($funnel_id);
+		$global_percent = (float)$fConfig['global_discount_percent'];
+
+		// Apply per-item overrides (exclude global, specific item discount)
+		foreach ($order->get_items('line_item') as $item) {
+			$pid = $item->get_product_id();
+			$product = $item->get_product();
+			if (!$product) { continue; }
+			$sku = (string)$product->get_sku();
+			
+			$pConf = FunnelConfig::getProductConfig($fConfig, $pid, $sku);
+			if ($pConf && !empty($pConf['exclude_global_discount'])) {
+				// Excluded from global discount. Check for specific item discount.
+				$item_discount = isset($pConf['item_discount_percent']) ? (float)$pConf['item_discount_percent'] : 0.0;
+				if ($item_discount > 0) {
+					$qty = $item->get_quantity();
+					$regular = (float) $product->get_price(); // MSRP
+					$discounted = $regular * (1 - ($item_discount / 100.0));
+					// Set subtotal to MSRP (standard WC practice) and total to discounted
+					// We use set_total() because calculate_totals() was already called once, 
+					// but we might need to re-calc tax if we were handling tax.
+					$item->set_subtotal($regular * $qty);
+					$item->set_total($discounted * $qty);
+				}
+				// Mark as excluded
+				$item->add_meta_data('_eao_exclude_global_discount', '1', true);
+				if ($item_discount > 0) {
+					$item->add_meta_data('_eao_item_discount_percent', $item_discount, true);
+				}
+				$item->save();
+			}
+		}
+
+		// Apply optional global discount by adjusting line item totals (no separate fee),
+		// mirroring how EAO admin orders persist global discounts.
 		if ($global_percent > 0.0) {
 			$line_items = $order->get_items('line_item');
 			$products_gross = 0.0;
-			foreach ($line_items as $li) {
+			$eligible_items = [];
+			foreach ($line_items as $item_id => $li) {
+				if ($li->get_meta('_eao_exclude_global_discount')) { continue; }
 				$products_gross += (float) $li->get_subtotal();
+				$eligible_items[$item_id] = $li;
 			}
+
 			if ($products_gross > 0.0) {
 				$global_discount = round($products_gross * ($global_percent / 100.0), 2);
 				$target_cents = (int) round($global_discount * 100);
-				// Distribute discount across items in cents to preserve the exact total.
+				// Distribute discount across eligible items in cents to preserve the exact total.
 				$alloc_cents = [];
 				$acc = 0;
 				$idx = 0;
-				$last = count($line_items) - 1;
-				foreach ($line_items as $item_id => $li) {
+				$last = count($eligible_items) - 1;
+				foreach ($eligible_items as $item_id => $li) {
 					$sub = (float) $li->get_subtotal();
-					$raw = ($sub * ($global_percent / 100.0));
-					$cents = ($idx === $last) ? max(0, $target_cents - $acc) : (int) round($raw * 100);
+					// Proportional share of the discount
+					$ratio = $sub / $products_gross;
+					$cents = ($idx === $last) ? max(0, $target_cents - $acc) : (int) round($target_cents * $ratio);
 					$alloc_cents[$item_id] = $cents;
 					$acc += $cents;
 					$idx++;
 				}
-				// Apply allocated discounts to each line item total.
-				foreach ($line_items as $item_id => $li) {
+				// Apply allocated discounts to each eligible line item total.
+				foreach ($eligible_items as $item_id => $li) {
 					$sub = (float) $li->get_subtotal();
 					$disc_cents = isset($alloc_cents[$item_id]) ? $alloc_cents[$item_id] : 0;
 					$new_total = max(0.0, $sub - ($disc_cents / 100.0));
@@ -166,7 +203,7 @@ class WebhookController {
 						$li->save();
 					}
 				}
-				// Persist EAO global discount percent so the admin UI shows 10%.
+				// Persist EAO global discount percent so the admin UI shows it.
 				$order->update_meta_data('_eao_global_product_discount_percent', $global_percent);
 			}
 		}

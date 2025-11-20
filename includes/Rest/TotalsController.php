@@ -8,6 +8,7 @@ use WC_Order_Item_Product;
 use WC_Order_Item_Shipping;
 use HP_FB\Services\PointsService;
 use HP_FB\Util\Resolver;
+use HP_FB\Util\FunnelConfig;
 
 if (!defined('ABSPATH')) { exit; }
 
@@ -21,9 +22,10 @@ class TotalsController {
 	}
 
 	public function handle(WP_REST_Request $request) {
-		$address = (array) $request->get_param('address');
-		$items   = (array) $request->get_param('items');
-		$coupons = (array) $request->get_param('coupon_codes');
+		$funnel_id = (string) ($request->get_param('funnel_id') ?? 'default');
+		$address   = (array) $request->get_param('address');
+		$items     = (array) $request->get_param('items');
+		$coupons   = (array) $request->get_param('coupon_codes');
 		$selected_rate = (array) $request->get_param('selected_rate');
 		$points_to_redeem = (int) ($request->get_param('points_to_redeem') ?? 0);
 		$email = (string) ($request->get_param('customer_email') ?? '');
@@ -72,20 +74,68 @@ class TotalsController {
 				$order->add_item($ship);
 			}
 
-      // First pass calculation to know product net (excludes shipping/tax)
-      $order->calculate_totals(false);
-      $products_gross = (float) $order->get_subtotal();
-      $discount_total = (float) $order->get_discount_total();
-      // Apply global 10% discount on products as a negative fee (to mirror storefront display)
-      $global_discount = round($products_gross * 0.10, 2);
-      if ($global_discount > 0.0) {
-        $fee = new \WC_Order_Item_Fee();
-        $fee->set_name('Global discount (10%)');
-        $fee->set_amount(-1 * $global_discount);
-        $fee->set_total(-1 * $global_discount);
-        $order->add_item($fee);
-      }
-      $products_net = max(0.0, $products_gross - $discount_total - $global_discount);
+			// First pass calculation to know product net (excludes shipping/tax)
+			$order->calculate_totals(false);
+			
+			// Load funnel config for discounts
+			$fConfig = FunnelConfig::get($funnel_id);
+			$global_percent = (float)$fConfig['global_discount_percent'];
+			
+			// Apply per-item overrides (exclude global, specific item discount)
+			foreach ($order->get_items() as $item) {
+				if (!$item instanceof WC_Order_Item_Product) { continue; }
+				$pid = $item->get_product_id();
+				$product = $item->get_product();
+				if (!$product) { continue; }
+				$sku = (string)$product->get_sku();
+				
+				$pConf = FunnelConfig::getProductConfig($fConfig, $pid, $sku);
+				if ($pConf && !empty($pConf['exclude_global_discount'])) {
+					// Excluded from global discount. Check for specific item discount.
+					$item_discount = isset($pConf['item_discount_percent']) ? (float)$pConf['item_discount_percent'] : 0.0;
+					if ($item_discount > 0) {
+						$qty = $item->get_quantity();
+						$regular = (float) $product->get_price(); // MSRP
+						$discounted = $regular * (1 - ($item_discount / 100.0));
+						// Set subtotal to MSRP (standard WC practice) and total to discounted
+						$item->set_subtotal($regular * $qty);
+						$item->set_total($discounted * $qty);
+					}
+					// Mark as excluded so global discount logic ignores it
+					$item->add_meta_data('_eao_exclude_global_discount', '1', true);
+				}
+			}
+
+			$products_gross = 0.0;
+			// Sum up subtotal of items NOT excluded from global discount
+			foreach ($order->get_items() as $item) {
+				if (!$item instanceof WC_Order_Item_Product) { continue; }
+				// If excluded, it contributes to net but not to the global discount base
+				if ($item->get_meta('_eao_exclude_global_discount')) {
+					continue;
+				}
+				$products_gross += (float)$item->get_subtotal();
+			}
+
+			$discount_total = (float) $order->get_discount_total();
+			$global_discount = 0.0;
+			if ($global_percent > 0.0 && $products_gross > 0.0) {
+				$global_discount = round($products_gross * ($global_percent / 100.0), 2);
+				if ($global_discount > 0.0) {
+					$fee = new \WC_Order_Item_Fee();
+					$fee->set_name('Global discount (' . $global_percent . '%)');
+					$fee->set_amount(-1 * $global_discount);
+					$fee->set_total(-1 * $global_discount);
+					$order->add_item($fee);
+				}
+			}
+			
+			// Re-calculate subtotal of all products (including excluded ones) for net calculation
+			$all_products_subtotal = (float)$order->get_subtotal(); 
+			// Note: get_subtotal() might be affected by our set_total() changes? 
+			// Actually WC_Order::get_subtotal() sums line subtotals. We kept set_subtotal() as MSRP.
+			
+			$products_net = max(0.0, $all_products_subtotal - $discount_total - $global_discount);
 
       // Points discount (preview only). Cap to products_net (no points on shipping).
       $pointsDiscount = 0.0;
