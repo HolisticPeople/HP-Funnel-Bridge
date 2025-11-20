@@ -93,25 +93,36 @@ class WebhookController {
 			$qty = max(1, (int)($it['qty'] ?? 1));
 			$product = Resolver::resolveProductFromItem((array)$it);
 			if (!$product) { continue; }
-			// Prefer Woo's helper to add products so line items are identical to native orders
+
+			$is_free_bonus = !empty($it['free_bonus']);
+			$price = (float) $product->get_price();
+
 			if (method_exists($order, 'add_product')) {
-				$order->add_product($product, $qty);
+				$item_id = $order->add_product($product, $qty, [
+					'subtotal' => $price * $qty,
+					'total'    => $is_free_bonus ? 0.0 : $price * $qty,
+				]);
+				if ($item_id && $is_free_bonus) {
+					$li = $order->get_item($item_id);
+					if ($li) {
+						$li->update_meta_data('_eao_exclude_global_discount', '1');
+						$li->update_meta_data('_eao_item_discount_percent', 100.0);
+						$li->save();
+					}
+				}
 			} else {
 				$item = new \WC_Order_Item_Product();
 				$item->set_product($product);
 				$item->set_quantity($qty);
-				$item->set_subtotal($product->get_price() * $qty);
-				$item->set_total($product->get_price() * $qty);
+				$item->set_subtotal($price * $qty);
+				$item->set_total($is_free_bonus ? 0.0 : $price * $qty);
+				if ($is_free_bonus) {
+					$item->update_meta_data('_eao_exclude_global_discount', '1');
+					$item->update_meta_data('_eao_item_discount_percent', 100.0);
+				}
 				$order->add_item($item);
 			}
 			$added_items++;
-		}
-
-		// Illumodine value‑pack: for every 2oz bottle purchased, append a FREE 0.5oz bottle line
-		// with 100% discount so the Woo order mirrors the marketing offer while totals stay intact.
-		$funnel_id = isset($draft['funnel_id']) ? (string) $draft['funnel_id'] : 'default';
-		if ($funnel_id === 'illumodine') {
-			$this->appendIllumodineFreeBottles($order, (array) $draft['items']);
 		}
 		// Address
 		$this->applyAddress($order, 'billing', array_merge((array)$draft['shipping_address'], ['email' => $email]));
@@ -136,6 +147,7 @@ class WebhookController {
 		$order->calculate_totals(false);
 
 		// Now apply per-funnel discount configuration
+		$funnel_id = isset($draft['funnel_id']) ? (string) $draft['funnel_id'] : 'default';
 		$fConfig = FunnelConfig::get($funnel_id);
 		$global_percent = (float)$fConfig['global_discount_percent'];
 
@@ -398,68 +410,6 @@ class WebhookController {
 		}
 	}
 
-	/**
-	 * Illumodine special: for every value‑pack (2 fl oz) purchased, append a FREE 0.5oz bottle
-	 * line item with 100% discount so that the WooCommerce / EAO order clearly shows the bonus.
-	 *
-	 * This does not change the charged amount – the free bottle has subtotal set to MSRP and
-	 * total set to 0, recorded as a per‑item 100% discount.
-	 *
-	 * @param \WC_Order $order
-	 * @param array     $draftItems The original draft items payload (from checkout)
-	 */
-	private function appendIllumodineFreeBottles($order, array $draftItems): void {
-		if (!function_exists('wc_get_product_id_by_sku') || !method_exists($order, 'add_item')) {
-			return;
-		}
-
-		// Count how many value‑pack (2oz) bottles were purchased (SKU HG-Illum2 from config)
-		$valuePackSku = 'HG-Illum2';
-		$freeSku      = 'HG-Illum05';
-		$freeQty      = 0;
-
-		foreach ($draftItems as $it) {
-			if (!is_array($it)) { continue; }
-			$sku = isset($it['sku']) ? (string) $it['sku'] : '';
-			if ($sku === $valuePackSku) {
-				$qty = isset($it['qty']) ? (int) $it['qty'] : 1;
-				if ($qty > 0) {
-					$freeQty += $qty;
-				}
-			}
-		}
-
-		if ($freeQty <= 0) {
-			return;
-		}
-
-		$freeProductId = wc_get_product_id_by_sku($freeSku);
-		if (!$freeProductId) {
-			return;
-		}
-		$prod = wc_get_product($freeProductId);
-		if (!$prod) {
-			return;
-		}
-
-		$msrp = (float) $prod->get_regular_price();
-		if ($msrp <= 0) {
-			$msrp = (float) $prod->get_price();
-		}
-
-		$item = new \WC_Order_Item_Product();
-		$item->set_product($prod);
-		$item->set_quantity($freeQty);
-		$item->set_subtotal($msrp * $freeQty);
-		$item->set_total(0.0);
-
-		// Mark as 100% discounted and excluded from any global discount.
-		$item->update_meta_data('_eao_exclude_global_discount', '1');
-		$item->update_meta_data('_eao_item_discount_percent', 100.0);
-
-		$order->add_item($item);
-		$item->save();
-	}
 }
 
 
