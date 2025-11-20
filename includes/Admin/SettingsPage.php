@@ -116,6 +116,20 @@ class SettingsPage {
 						];
 					}
 				}
+				// Preserve simple payment_style colors if present
+				$row['payment_style'] = [];
+				if (!empty($cfg['payment_style']) && is_array($cfg['payment_style'])) {
+					$ps = $cfg['payment_style'];
+					if (!empty($ps['background_color'])) {
+						$row['payment_style']['background_color'] = sanitize_hex_color((string)$ps['background_color']);
+					}
+					if (!empty($ps['card_color'])) {
+						$row['payment_style']['card_color'] = sanitize_hex_color((string)$ps['card_color']);
+					}
+					if (!empty($ps['accent_color'])) {
+						$row['payment_style']['accent_color'] = sanitize_hex_color((string)$ps['accent_color']);
+					}
+				}
 				$funnel_configs[$fid_key] = $row;
 			}
 		}
