@@ -26,59 +26,108 @@ class FunnelAjax {
 		if ($term === '') {
 			wp_send_json_success([]);
 		}
-		// Reuse EAO's rich product search to ensure identical behavior to the
-		// Enhanced Admin Order editor. We call its admin-ajax endpoint and then
-		// adapt the response to a lightweight structure for this UI.
-		$ajax_url = admin_url('admin-ajax.php');
-		$eao_nonce = wp_create_nonce('eao_search_products_for_admin_order_nonce');
-		$resp = wp_remote_post($ajax_url, [
-			'timeout' => 10,
-			'body' => [
-				'action'      => 'eao_search_products_for_admin_order',
-				'nonce'       => $eao_nonce,
-				'search_term' => $term,
-				'order_id'    => 0,
-			],
-		]);
-		if (is_wp_error($resp)) {
-			wp_send_json_error(['message' => 'Search failed'], 500);
-		}
-		$body = wp_remote_retrieve_body($resp);
-		$data = json_decode((string) $body, true);
-		if (!is_array($data) || empty($data['success']) || empty($data['data']) || !is_array($data['data'])) {
-			wp_send_json_success([]);
-		}
-		$out = [];
-		foreach ($data['data'] as $row) {
-			$pid = isset($row['id']) ? (int)$row['id'] : 0;
-			if ($pid <= 0) { continue; }
-			$name = isset($row['name']) ? (string)$row['name'] : '';
-			$sku  = isset($row['sku']) ? (string)$row['sku'] : '';
-			$price_raw = isset($row['price_raw']) ? (float)$row['price_raw'] : 0.0;
-			$thumb = isset($row['thumbnail_url']) ? (string)$row['thumbnail_url'] : '';
-			// Fallbacks from product object if needed
-			if (($price_raw <= 0 || $thumb === '') && function_exists('wc_get_product')) {
-				$p = wc_get_product($pid);
-				if ($p) {
-					if ($price_raw <= 0) {
-						$price_raw = (float) $p->get_regular_price();
-					}
-					if ($thumb === '') {
-						$img_id = $p->get_image_id();
-						if ($img_id) {
-							$url = wp_get_attachment_image_url($img_id, 'thumbnail');
-							if ($url) { $thumb = $url; }
-						}
+		global $wpdb;
+		$search_term = $term;
+		$search_term_lower = strtolower($search_term);
+		$search_words = array_filter(explode(' ', $search_term_lower));
+		$limit_per_query = 20;
+
+		$products_with_scores = [];
+		$searched_product_ids = [];
+
+		// 1. Title search (adapted from EAO).
+		$title_query = $wpdb->prepare(
+			"SELECT ID, post_title FROM {$wpdb->posts}
+			 WHERE post_type IN ('product','product_variation') AND post_status = 'publish'
+			 AND post_title LIKE %s
+			 ORDER BY CASE
+				WHEN post_title LIKE %s THEN 1
+				WHEN post_title LIKE %s THEN 2
+				ELSE 3
+			 END, post_title ASC
+			 LIMIT %d",
+			'%' . $wpdb->esc_like($search_term) . '%',
+			$wpdb->esc_like($search_term),
+			$wpdb->esc_like($search_term) . '%',
+			$limit_per_query
+		);
+		$title_matches = $wpdb->get_results($title_query);
+		foreach ($title_matches as $product_post) {
+			$product_title_lower = strtolower($product_post->post_title);
+			$score = 0;
+			if ($product_title_lower === $search_term_lower) {
+				$score = 100;
+			} elseif (strpos($product_title_lower, $search_term_lower) === 0) {
+				$score = 90;
+			} else {
+				$score = 70;
+				$match_count = 0;
+				foreach ($search_words as $word) {
+					if (strpos($product_title_lower, $word) !== false) {
+						$match_count++;
 					}
 				}
+				if (count($search_words) > 1 && $match_count === count($search_words)) {
+					$score += 10;
+				}
 			}
-			$out[] = [
-				'id'    => $pid,
-				'name'  => $name,
-				'sku'   => $sku,
-				'image' => $thumb,
-				'price' => $price_raw,
+			$products_with_scores[$product_post->ID] = ['id' => $product_post->ID, 'score' => $score];
+			$searched_product_ids[] = $product_post->ID;
+		}
+
+		// 2. SKU search.
+		if (count($searched_product_ids) < $limit_per_query) {
+			$sku_query_args = [
+				"SELECT p.ID, p.post_title, pm.meta_value as sku
+				 FROM {$wpdb->posts} p
+				 INNER JOIN {$wpdb->postmeta} pm ON p.ID = pm.post_id
+				 WHERE p.post_type IN ('product','product_variation') AND p.post_status = 'publish'
+				 AND pm.meta_key = '_sku' AND pm.meta_value LIKE %s"
 			];
+			$prepared_values = ['%' . $wpdb->esc_like($search_term) . '%'];
+			if (!empty($searched_product_ids)) {
+				$placeholders = implode(',', array_fill(0, count($searched_product_ids), '%d'));
+				$sku_query_args[] = "AND p.ID NOT IN ({$placeholders})";
+				$prepared_values = array_merge($prepared_values, $searched_product_ids);
+			}
+			$sku_query_args[] = "ORDER BY CASE
+									WHEN pm.meta_value LIKE %s THEN 1
+									WHEN pm.meta_value LIKE %s THEN 2
+									ELSE 3
+								 END, p.post_title ASC
+								 LIMIT %d";
+			$prepared_values[] = $wpdb->esc_like($search_term);
+			$prepared_values[] = $wpdb->esc_like($search_term) . '%';
+			$prepared_values[] = $limit_per_query - count($searched_product_ids);
+
+			$sku_query = $wpdb->prepare(implode(' ', $sku_query_args), $prepared_values);
+			$sku_matches = $wpdb->get_results($sku_query);
+			foreach ($sku_matches as $product_post) {
+				$sku_lower = strtolower($product_post->sku);
+				$score = ($sku_lower === $search_term_lower) ? 95 : 80;
+				if (isset($products_with_scores[$product_post->ID])) {
+					$products_with_scores[$product_post->ID]['score'] = max($products_with_scores[$product_post->ID]['score'], $score + 5);
+				} else {
+					$products_with_scores[$product_post->ID] = ['id' => $product_post->ID, 'score' => $score];
+					$searched_product_ids[] = $product_post->ID;
+				}
+			}
+		}
+
+		// Sort by score desc and load products.
+		if (!empty($products_with_scores)) {
+			uasort($products_with_scores, function($a, $b){
+				return $b['score'] - $a['score'];
+			});
+		}
+		$final_ids = array_slice(array_map(function($row){ return $row['id']; }, $products_with_scores), 0, $limit_per_query);
+		$out = [];
+		if (!empty($final_ids)) {
+			foreach ($final_ids as $pid) {
+				$product = wc_get_product($pid);
+				if (!$product) { continue; }
+				$out[] = self::formatProduct($product);
+			}
 		}
 		wp_send_json_success($out);
 	}
