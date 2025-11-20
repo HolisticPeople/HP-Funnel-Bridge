@@ -394,8 +394,7 @@ class SettingsPage {
 			<h3>Products</h3>
 			<p>
 				<label for="hp-fb-product-search">Search products by name or SKU:</label><br />
-				<input type="search" id="hp-fb-product-search" style="min-width:260px;" placeholder="Start typing to search&hellip;" />
-				<button type="button" class="button" id="hp-fb-product-search-btn">Search</button>
+				<input type="search" id="hp-fb-product-search" style="min-width:260px;" placeholder="Type at least 3 characters to search&hellip;" />
 			</p>
 			<div id="hp-fb-product-search-results" style="margin-bottom:12px;"></div>
 
@@ -559,7 +558,6 @@ class SettingsPage {
 
 			// Product search
 			const searchInput = document.getElementById('hp-fb-product-search');
-			const searchBtn = document.getElementById('hp-fb-product-search-btn');
 			const resultsBox = document.getElementById('hp-fb-product-search-results');
 			function renderSearchResults(items){
 				if (!resultsBox) return;
@@ -601,9 +599,10 @@ class SettingsPage {
 					}
 				}, { once: true });
 			}
+			let searchTimer = null;
 			function performSearch(){
 				const term = searchInput ? (searchInput.value || '').trim() : '';
-				if (!term) { renderSearchResults([]); return; }
+				if (!term || term.length < 3) { renderSearchResults([]); return; }
 				if (resultsBox) { resultsBox.innerHTML = '<p class=\"description\">Searching&hellip;</p>'; }
 				const payload = {
 					action: 'hp_fb_search_products',
@@ -623,11 +622,20 @@ class SettingsPage {
 						renderSearchResults([]);
 					});
 			}
-			if (searchBtn) searchBtn.addEventListener('click', performSearch);
 			if (searchInput) {
-				searchInput.addEventListener('keydown', function(e){
-					if (e.key === 'Enter') {
-						e.preventDefault();
+				searchInput.addEventListener('keyup', function(e){
+					const term = (searchInput.value || '').trim();
+					if (term.length < 3) {
+						if (resultsBox) resultsBox.innerHTML = '<p class=\"description\">Type at least 3 characters to search.</p>';
+						if (searchTimer) { clearTimeout(searchTimer); searchTimer = null; }
+						return;
+					}
+					if (searchTimer) clearTimeout(searchTimer);
+					searchTimer = setTimeout(function(){ performSearch(); }, 250);
+				});
+				searchInput.addEventListener('focus', function(){
+					const term = (searchInput.value || '').trim();
+					if (term.length >= 3) {
 						performSearch();
 					}
 				});
