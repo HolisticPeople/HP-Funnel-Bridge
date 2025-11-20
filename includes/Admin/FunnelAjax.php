@@ -200,6 +200,16 @@ class FunnelAjax {
 		if ($bg !== '')     { $style['background_color'] = $bg; }
 		if ($card !== '')   { $style['card_color'] = $card; }
 
+		// Optional branding (favicon + social text)
+		$branding_in = isset($payload['branding']) && is_array($payload['branding']) ? $payload['branding'] : [];
+		$branding = [];
+		if (!empty($branding_in['favicon_id'])) {
+			$branding['favicon_id'] = (int) $branding_in['favicon_id'];
+		}
+		if (isset($branding_in['social_text'])) {
+			$branding['social_text'] = sanitize_text_field((string) $branding_in['social_text']);
+		}
+
 		$opts = get_option('hp_fb_settings', []);
 		if (!isset($opts['funnel_configs']) || !is_array($opts['funnel_configs'])) {
 			$opts['funnel_configs'] = [];
@@ -208,6 +218,7 @@ class FunnelAjax {
 			'global_discount_percent' => $global,
 			'products' => $products,
 			'payment_style' => $style,
+			'branding' => $branding,
 		];
 		update_option('hp_fb_settings', $opts);
 		wp_send_json_success();

@@ -22,8 +22,13 @@ class SettingsPage {
 		if ($hook !== 'settings_page_hp-funnel-bridge') {
 			return;
 		}
+		// Color pickers for hosted payment style
 		wp_enqueue_style('wp-color-picker');
 		wp_enqueue_script('wp-color-picker');
+		// Media library for favicon picker
+		if (function_exists('wp_enqueue_media')) {
+			wp_enqueue_media();
+		}
 		// Tiny init script for our color fields
 		wp_add_inline_script(
 			'wp-color-picker',
@@ -144,6 +149,17 @@ class SettingsPage {
 					}
 					if (!empty($ps['accent_color'])) {
 						$row['payment_style']['accent_color'] = sanitize_hex_color((string)$ps['accent_color']);
+					}
+				}
+				// Preserve optional branding (favicon + social text)
+				$row['branding'] = [];
+				if (!empty($cfg['branding']) && is_array($cfg['branding'])) {
+					$br = $cfg['branding'];
+					if (!empty($br['favicon_id'])) {
+						$row['branding']['favicon_id'] = (int) $br['favicon_id'];
+					}
+					if (isset($br['social_text'])) {
+						$row['branding']['social_text'] = sanitize_text_field((string) $br['social_text']);
 					}
 				}
 				$funnel_configs[$fid_key] = $row;
@@ -368,6 +384,10 @@ class SettingsPage {
 		$style_accent = isset($style_cfg['accent_color']) ? (string)$style_cfg['accent_color'] : '#eab308';
 		$style_bg     = isset($style_cfg['background_color']) ? (string)$style_cfg['background_color'] : '#020617';
 		$style_card   = isset($style_cfg['card_color']) ? (string)$style_cfg['card_color'] : '#0f172a';
+		$branding_cfg = isset($config['branding']) && is_array($config['branding']) ? $config['branding'] : [];
+		$favicon_id   = isset($branding_cfg['favicon_id']) ? (int) $branding_cfg['favicon_id'] : 0;
+		$favicon_url  = $favicon_id > 0 ? wp_get_attachment_image_url($favicon_id, 'thumbnail') : '';
+		$social_text  = isset($branding_cfg['social_text']) ? (string) $branding_cfg['social_text'] : '';
 		$products_cfg = isset($config['products']) && is_array($config['products']) ? $config['products'] : [];
 		// Preload product data for existing rows.
 		$rows = [];
@@ -452,6 +472,33 @@ class SettingsPage {
 				</tr>
 			</table>
 
+			<h3>Branding &amp; Social</h3>
+			<p class="description">Optional per-funnel branding used by hosted pages and funnels (favicon and default social share text).</p>
+			<table class="form-table">
+				<tr>
+					<th scope="row">Favicon</th>
+					<td>
+						<input type="hidden" id="hp-fb-favicon-id" value="<?php echo esc_attr($favicon_id); ?>" />
+						<button type="button" class="button" id="hp-fb-favicon-btn">Choose favicon</button>
+						<span id="hp-fb-favicon-preview" style="margin-left:10px; vertical-align:middle;">
+							<?php if ($favicon_id && $favicon_url): ?>
+								<img src="<?php echo esc_url($favicon_url); ?>" alt="" style="width:32px;height:32px;object-fit:contain;border-radius:4px;border:1px solid #ccd0d4;" />
+							<?php else: ?>
+								<span class="description">No favicon selected.</span>
+							<?php endif; ?>
+						</span>
+						<p class="description">Small square icon used for browser tab / social previews. Recommended 32x32px PNG.</p>
+					</td>
+				</tr>
+				<tr>
+					<th scope="row">Social share text</th>
+					<td>
+						<textarea id="hp-fb-social-text" rows="2" cols="60" class="large-text"><?php echo esc_textarea($social_text); ?></textarea>
+						<p class="description">Optional default text for social network share links (e.g., Facebook/Twitter). Funnels can read this via the Bridge config.</p>
+					</td>
+				</tr>
+			</table>
+
 			<h3>Products</h3>
 			<p>
 				<label for="hp-fb-product-search">Search products by name or SKU:</label><br />
@@ -489,8 +536,41 @@ class SettingsPage {
 			const initialRows = <?php echo wp_json_encode($rows); ?>;
 			const body = document.getElementById('hp-fb-funnel-products-body');
 			const statusEl = document.getElementById('hp-fb-funnel-save-status');
+			const faviconIdInput = document.getElementById('hp-fb-favicon-id');
+			const faviconPreview = document.getElementById('hp-fb-favicon-preview');
+			const faviconBtn = document.getElementById('hp-fb-favicon-btn');
+			let faviconFrame = null;
 
 			function fmt(v){ return (typeof v === 'number' && isFinite(v)) ? v.toFixed(2) : ''; }
+
+			// Favicon media picker
+			if (faviconBtn && window.wp && window.wp.media) {
+				faviconBtn.addEventListener('click', function(e){
+					e.preventDefault();
+					if (faviconFrame) {
+						faviconFrame.open();
+						return;
+					}
+					faviconFrame = wp.media({
+						title: 'Select favicon',
+						button: { text: 'Use this icon' },
+						multiple: false,
+						library: { type: 'image' }
+					});
+					faviconFrame.on('select', function(){
+						const attachment = faviconFrame.state().get('selection').first().toJSON();
+						if (!attachment) return;
+						if (faviconIdInput) {
+							faviconIdInput.value = attachment.id || '';
+						}
+						if (faviconPreview) {
+							const thumb = attachment.sizes && attachment.sizes.thumbnail ? attachment.sizes.thumbnail.url : attachment.url;
+							faviconPreview.innerHTML = '<img src="'+ String(thumb || '') +'" alt="" style="width:32px;height:32px;object-fit:contain;border-radius:4px;border:1px solid #ccd0d4;" />';
+						}
+					});
+					faviconFrame.open();
+				});
+			}
 
 			function syncRowUI(row, tr){
 				if (!tr || !row) return;
@@ -635,6 +715,8 @@ class SettingsPage {
 					const payBg = (document.getElementById('hp-fb-pay-bg') || {}).value || '';
 					const payCard = (document.getElementById('hp-fb-pay-card') || {}).value || '';
 					const payAccent = (document.getElementById('hp-fb-pay-accent') || {}).value || '';
+					const faviconId = (faviconIdInput && faviconIdInput.value) ? faviconIdInput.value : '';
+					const socialText = (document.getElementById('hp-fb-social-text') || {}).value || '';
 					// Refresh rows from DOM in case indexes shifted
 					const trs = body ? Array.prototype.slice.call(body.querySelectorAll('tr')) : [];
 					currentRows = trs.map(function(tr){
@@ -663,6 +745,10 @@ class SettingsPage {
 							background_color: payBg,
 							card_color: payCard,
 							accent_color: payAccent,
+						},
+						branding: {
+							favicon_id: faviconId ? parseInt(faviconId, 10) || 0 : 0,
+							social_text: socialText,
 						},
 					};
 					fetch(ajaxurl + '?action=hp_fb_save_funnel_config', {
