@@ -94,6 +94,7 @@
                 uu.hash = "";
                 uu.searchParams.set("go", "upsell");
                 uu.searchParams.set("order_id", String(t.order_id));
+                if (piId) uu.searchParams.set("pi_id", String(piId));
                 window.location.replace(uu.toString());
                 return;
               }

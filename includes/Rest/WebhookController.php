@@ -127,9 +127,11 @@ class WebhookController {
 		// First totals pass so WooCommerce has a baseline before we apply discounts
 		$order->calculate_totals(false);
 
-		// Apply global 10% discount by adjusting line item totals (no separate fee),
-		// mirroring how EAO admin orders persist global discounts.
-		$global_percent = 10.0;
+		// Apply optional global discount by adjusting line item totals (no separate fee),
+		// mirroring how EAO admin orders persist global discounts. Currently only the
+		// fasting kit funnel uses a global 10% discount.
+		$funnel_id = isset($draft['funnel_id']) ? (string) $draft['funnel_id'] : 'default';
+		$global_percent = ($funnel_id === 'fastingkit') ? 10.0 : 0.0;
 		if ($global_percent > 0.0) {
 			$line_items = $order->get_items('line_item');
 			$products_gross = 0.0;
