@@ -26,38 +26,61 @@ class FunnelAjax {
 		if ($term === '') {
 			wp_send_json_success([]);
 		}
-		$results = [];
-		$seen = [];
-		// Exact SKU match first
-		if (function_exists('wc_get_product_id_by_sku')) {
-			$sku_id = wc_get_product_id_by_sku($term);
-			if ($sku_id) {
-				$prod = wc_get_product($sku_id);
-				if ($prod) {
-					$seen[$sku_id] = true;
-					$results[] = self::formatProduct($prod);
+		// Reuse EAO's rich product search to ensure identical behavior to the
+		// Enhanced Admin Order editor. We call its admin-ajax endpoint and then
+		// adapt the response to a lightweight structure for this UI.
+		$ajax_url = admin_url('admin-ajax.php');
+		$eao_nonce = wp_create_nonce('eao_search_products_for_admin_order_nonce');
+		$resp = wp_remote_post($ajax_url, [
+			'timeout' => 10,
+			'body' => [
+				'action'      => 'eao_search_products_for_admin_order',
+				'nonce'       => $eao_nonce,
+				'search_term' => $term,
+				'order_id'    => 0,
+			],
+		]);
+		if (is_wp_error($resp)) {
+			wp_send_json_error(['message' => 'Search failed'], 500);
+		}
+		$body = wp_remote_retrieve_body($resp);
+		$data = json_decode((string) $body, true);
+		if (!is_array($data) || empty($data['success']) || empty($data['data']) || !is_array($data['data'])) {
+			wp_send_json_success([]);
+		}
+		$out = [];
+		foreach ($data['data'] as $row) {
+			$pid = isset($row['id']) ? (int)$row['id'] : 0;
+			if ($pid <= 0) { continue; }
+			$name = isset($row['name']) ? (string)$row['name'] : '';
+			$sku  = isset($row['sku']) ? (string)$row['sku'] : '';
+			$price_raw = isset($row['price_raw']) ? (float)$row['price_raw'] : 0.0;
+			$thumb = isset($row['thumbnail_url']) ? (string)$row['thumbnail_url'] : '';
+			// Fallbacks from product object if needed
+			if (($price_raw <= 0 || $thumb === '') && function_exists('wc_get_product')) {
+				$p = wc_get_product($pid);
+				if ($p) {
+					if ($price_raw <= 0) {
+						$price_raw = (float) $p->get_regular_price();
+					}
+					if ($thumb === '') {
+						$img_id = $p->get_image_id();
+						if ($img_id) {
+							$url = wp_get_attachment_image_url($img_id, 'thumbnail');
+							if ($url) { $thumb = $url; }
+						}
+					}
 				}
 			}
-		}
-		// Fuzzy name search
-		if (function_exists('wc_get_products')) {
-			$args = [
-				'limit' => 20,
-				'status' => ['publish'],
-				'orderby' => 'title',
-				'order' => 'ASC',
-				'search' => $term,
+			$out[] = [
+				'id'    => $pid,
+				'name'  => $name,
+				'sku'   => $sku,
+				'image' => $thumb,
+				'price' => $price_raw,
 			];
-			$prods = wc_get_products($args);
-			foreach ($prods as $p) {
-				if (!$p) { continue; }
-				$pid = $p->get_id();
-				if (isset($seen[$pid])) { continue; }
-				$seen[$pid] = true;
-				$results[] = self::formatProduct($p);
-			}
 		}
-		wp_send_json_success($results);
+		wp_send_json_success($out);
 	}
 
 	private static function formatProduct($product): array {

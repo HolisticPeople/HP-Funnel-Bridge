@@ -610,7 +610,7 @@ class SettingsPage {
 					nonce: nonce,
 					term: term,
 				};
-				fetch(ajaxurl + '?action=hp_fb_search_products&_ajax_nonce='+encodeURIComponent(nonce)+'&term='+encodeURIComponent(term))
+				fetch(ajaxurl + '?action=hp_fb_search_products&_ajax_nonce='+encodeURIComponent(nonce)+'&funnel_id='+encodeURIComponent(funnelId)+'&term='+encodeURIComponent(term))
 					.then(function(r){ return r.json(); })
 					.then(function(data){
 						if (!data || !data.success) {
