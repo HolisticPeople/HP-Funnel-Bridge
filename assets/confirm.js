@@ -74,11 +74,17 @@
       async function tryRedirect() {
         if (!succ || !isSafeUrl(succ) || !piId) return;
         if (msg) msg.textContent = "Payment processed. Finishing up...";
+        
+        // Use absolute URL for polling to avoid relative path confusion on hosted pages
+        var pollingUrl = "/wp-json/hp-funnel/v1/orders/resolve?pi_id=" + encodeURIComponent(piId);
+        if (window.location.origin) {
+            pollingUrl = window.location.origin + pollingUrl;
+        }
+
         for (var i = 0; i < 30; i++) {
           try {
             var r = await fetch(
-              "/wp-json/hp-funnel/v1/orders/resolve?pi_id=" +
-                encodeURIComponent(piId),
+              pollingUrl,
               { headers: { Accept: "application/json" } }
             );
             if (r.ok) {
