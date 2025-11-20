@@ -88,6 +88,38 @@ class SettingsPage {
 			}
 		}
 		$out['funnels'] = $funnels;
+		// Preserve and lightly sanitize per-funnel configs (used by the Funnel Config UI).
+		// This structure is not edited via the main settings form, but when the user
+		// saves global settings we don't want to lose previously stored configs.
+		$funnel_configs = [];
+		if (!empty($value['funnel_configs']) && is_array($value['funnel_configs'])) {
+			foreach ($value['funnel_configs'] as $fid => $cfg) {
+				$fid_key = sanitize_key((string)$fid);
+				if ($fid_key === '' || !is_array($cfg)) { continue; }
+				// Shallow sanitize; detailed validation happens in the AJAX save handler.
+				$row = [];
+				$row['global_discount_percent'] = isset($cfg['global_discount_percent']) ? (float)$cfg['global_discount_percent'] : 0.0;
+				$row['products'] = [];
+				if (!empty($cfg['products']) && is_array($cfg['products'])) {
+					foreach ($cfg['products'] as $p) {
+						if (!is_array($p)) { continue; }
+						$pid = isset($p['product_id']) ? (int)$p['product_id'] : 0;
+						if ($pid <= 0) { continue; }
+						$role = isset($p['role']) ? (string)$p['role'] : 'base';
+						if (!in_array($role, ['base','optional','upsell'], true)) { $role = 'base'; }
+						$row['products'][] = [
+							'product_id' => $pid,
+							'sku' => isset($p['sku']) ? sanitize_text_field((string)$p['sku']) : '',
+							'role' => $role,
+							'exclude_global_discount' => !empty($p['exclude_global_discount']) ? 1 : 0,
+							'item_discount_percent' => isset($p['item_discount_percent']) ? (float)$p['item_discount_percent'] : 0.0,
+						];
+					}
+				}
+				$funnel_configs[$fid_key] = $row;
+			}
+		}
+		$out['funnel_configs'] = $funnel_configs;
 		// Webhook secrets (do not trim to avoid accidental spaces removal on paste? we will trim)
 		$out['webhook_secret_test'] = isset($value['webhook_secret_test']) ? trim((string)$value['webhook_secret_test']) : '';
 		$out['webhook_secret_live'] = isset($value['webhook_secret_live']) ? trim((string)$value['webhook_secret_live']) : '';
@@ -154,7 +186,7 @@ class SettingsPage {
 			table.hp-fb-table.widefat input[type="text"], table.hp-fb-table.widefat select { width:100%; margin:0; }
 		</style>
 		<table class="widefat hp-fb-table" style="max-width:100%; table-layout:fixed;">
-			<thead><tr><th style="width:12%;">Funnel ID</th><th style="width:18%;">Funnel Name</th><th style="width:24%;">Staging Origin</th><th style="width:10%;">Staging Mode</th><th style="width:24%;">Production Origin</th><th style="width:10%;">Production Mode</th><th style="width:90px;">Actions</th></tr></thead>
+			<thead><tr><th style="width:12%;">Funnel ID</th><th style="width:18%;">Funnel Name</th><th style="width:24%;">Staging Origin</th><th style="width:10%;">Staging Mode</th><th style="width:24%;">Production Origin</th><th style="width:10%;">Production Mode</th><th style="width:110px;">Actions</th></tr></thead>
 			<tbody id="hp-fb-registry-rows">
 				<?php foreach ($rows as $i => $r): ?>
 					<tr>
@@ -176,7 +208,12 @@ class SettingsPage {
 								<option value="off"  <?php selected(($r['mode_production'] ?? 'live'), 'off');  ?>>Off</option>
 							</select>
 						</td>
-						<td><button type="button" class="button button-secondary hp-fb-del-row">Delete</button></td>
+						<td>
+							<?php if (!empty($r['id'])): ?>
+								<a href="<?php echo esc_url( admin_url('options-general.php?page=hp-funnel-bridge&funnel_id=' . urlencode($r['id'])) ); ?>" class="button button-small" title="Configure funnel products and discounts">⚙</a>
+							<?php endif; ?>
+							<button type="button" class="button button-secondary button-small hp-fb-del-row">Delete</button>
+						</td>
 					</tr>
 				<?php endforeach; ?>
 			</tbody>
@@ -196,7 +233,7 @@ class SettingsPage {
 					'<td><select name="hp_fb_settings[funnels]['+i+'][mode_staging]"><option value="test" selected>Test</option><option value="live">Live</option><option value="off">Off</option></select></td>' +
 					'<td><input type="text" name="hp_fb_settings[funnels]['+i+'][origin_production]" value="" placeholder="https://www.example.com" /></td>' +
 					'<td><select name="hp_fb_settings[funnels]['+i+'][mode_production]"><option value="live" selected>Live</option><option value="test">Test</option><option value="off">Off</option></select></td>' +
-					'<td><button type="button" class="button button-secondary hp-fb-del-row">Delete</button></td>' +
+					'<td><span class="button button-small disabled" style="opacity:.5;cursor:default;">⚙</span> <button type="button" class="button button-secondary button-small hp-fb-del-row">Delete</button></td>' +
 				'</tr>';
 			}
 			if (addBtn) addBtn.addEventListener('click', function(){ tbody.insertAdjacentHTML('beforeend', tpl(nextIndex())); });
@@ -248,6 +285,11 @@ class SettingsPage {
 	}
 
 	public static function render(): void {
+		$funnel_id = isset($_GET['funnel_id']) ? sanitize_key((string)$_GET['funnel_id']) : '';
+		if ($funnel_id !== '') {
+			self::renderFunnelConfig($funnel_id);
+			return;
+		}
 		?>
 		<div class="wrap">
 			<h1>HP Funnel Bridge</h1>
@@ -260,6 +302,337 @@ class SettingsPage {
 				?>
 			</form>
 		</div>
+		<?php
+	}
+
+	/**
+	 * Render per-funnel configuration page (products, roles, discounts).
+	 */
+	private static function renderFunnelConfig(string $funnel_id): void {
+		$opts = get_option('hp_fb_settings', []);
+		$funnels = isset($opts['funnels']) && is_array($opts['funnels']) ? $opts['funnels'] : [];
+		$cfgs = isset($opts['funnel_configs']) && is_array($opts['funnel_configs']) ? $opts['funnel_configs'] : [];
+		$funnel = null;
+		foreach ($funnels as $f) {
+			if (!is_array($f)) { continue; }
+			if (!empty($f['id']) && (string)$f['id'] === $funnel_id) {
+				$funnel = $f;
+				break;
+			}
+		}
+		if (!$funnel) {
+			?>
+			<div class="wrap">
+				<h1>HP Funnel Bridge</h1>
+				<p style="margin: -6px 0 14px; color:#666;">Version <?php echo esc_html( defined('HP_FB_PLUGIN_VERSION') ? HP_FB_PLUGIN_VERSION : '' ); ?></p>
+				<p><?php esc_html_e('Funnel not found. Please go back to the main settings page and ensure the funnel ID exists.', 'hp-funnel-bridge'); ?></p>
+				<p><a href="<?php echo esc_url( admin_url('options-general.php?page=hp-funnel-bridge') ); ?>" class="button">&larr; Back to Funnel Registry</a></p>
+			</div>
+			<?php
+			return;
+		}
+		$name = isset($funnel['name']) ? (string)$funnel['name'] : $funnel_id;
+		$config = isset($cfgs[$funnel_id]) && is_array($cfgs[$funnel_id]) ? $cfgs[$funnel_id] : [];
+		$global_disc = isset($config['global_discount_percent']) ? (float)$config['global_discount_percent'] : 0.0;
+		$products_cfg = isset($config['products']) && is_array($config['products']) ? $config['products'] : [];
+		// Preload product data for existing rows.
+		$rows = [];
+		if (!empty($products_cfg)) {
+			foreach ($products_cfg as $row) {
+				$pid = isset($row['product_id']) ? (int)$row['product_id'] : 0;
+				if ($pid <= 0) { continue; }
+				$product = wc_get_product($pid);
+				if (!$product) { continue; }
+				$img = '';
+				if (method_exists($product, 'get_image_id')) {
+					$img_id = $product->get_image_id();
+					if ($img_id) {
+						$url = wp_get_attachment_image_url($img_id, 'thumbnail');
+						if ($url) { $img = $url; }
+					}
+				}
+				$sku = isset($row['sku']) && $row['sku'] !== '' ? (string)$row['sku'] : (string)$product->get_sku();
+				$price = (float)$product->get_regular_price();
+				$role = isset($row['role']) ? (string)$row['role'] : 'base';
+				if (!in_array($role, ['base','optional','upsell'], true)) { $role = 'base'; }
+				$exclude = !empty($row['exclude_global_discount']) ? 1 : 0;
+				$item_disc = isset($row['item_discount_percent']) ? (float)$row['item_discount_percent'] : 0.0;
+				$rows[] = [
+					'product_id' => $pid,
+					'name' => $product->get_name(),
+					'sku' => $sku,
+					'image' => $img,
+					'price' => $price,
+					'role' => $role,
+					'exclude_global_discount' => $exclude,
+					'item_discount_percent' => $item_disc,
+				];
+			}
+		}
+		$nonce = wp_create_nonce('hp_fb_funnel_config_' . $funnel_id);
+		?>
+		<div class="wrap hp-fb-funnel-config">
+			<h1>HP Funnel: <?php echo esc_html($name); ?></h1>
+			<p style="margin: -6px 0 10px; color:#666;">Funnel ID: <code><?php echo esc_html($funnel_id); ?></code></p>
+			<p><a href="<?php echo esc_url( admin_url('options-general.php?page=hp-funnel-bridge') ); ?>" class="button">&larr; Back to Funnel Registry</a></p>
+
+			<hr />
+
+			<h2>Discounts &amp; Products</h2>
+			<p class="description">Configure the products this funnel touches, their roles (Base / Optional / Upsell), and any per-product discount overrides.</p>
+
+			<table class="form-table">
+				<tr>
+					<th scope="row">Global product discount (%)</th>
+					<td>
+						<input type="number" step="0.1" min="0" max="100" id="hp-fb-global-discount" value="<?php echo esc_attr($global_disc); ?>" />
+						<p class="description">Optional global discount applied to non-excluded products for this funnel. Leave at 0 for no global discount.</p>
+					</td>
+				</tr>
+			</table>
+
+			<h3>Products</h3>
+			<p>
+				<label for="hp-fb-product-search">Search products by name or SKU:</label><br />
+				<input type="search" id="hp-fb-product-search" style="min-width:260px;" placeholder="Start typing to search&hellip;" />
+				<button type="button" class="button" id="hp-fb-product-search-btn">Search</button>
+			</p>
+			<div id="hp-fb-product-search-results" style="margin-bottom:12px;"></div>
+
+			<table class="widefat striped" id="hp-fb-funnel-products-table">
+				<thead>
+					<tr>
+						<th style="width:40px;">Image</th>
+						<th>Name</th>
+						<th style="width:110px;">SKU</th>
+						<th style="width:80px; text-align:center;">Role</th>
+						<th style="width:80px; text-align:center;">Exclude GD</th>
+						<th style="width:90px; text-align:right;">Price</th>
+						<th style="width:110px; text-align:center;">Discount %</th>
+						<th style="width:110px; text-align:right;">Discounted</th>
+						<th style="width:60px;">Actions</th>
+					</tr>
+				</thead>
+				<tbody id="hp-fb-funnel-products-body">
+				</tbody>
+			</table>
+
+			<p>
+				<button type="button" class="button button-primary" id="hp-fb-funnel-save">Save Funnel Config</button>
+				<span id="hp-fb-funnel-save-status" style="margin-left:10px;"></span>
+			</p>
+		</div>
+		<script>
+		(function(){
+			const funnelId = <?php echo wp_json_encode($funnel_id); ?>;
+			const nonce = <?php echo wp_json_encode($nonce); ?>;
+			const initialRows = <?php echo wp_json_encode($rows); ?>;
+			const body = document.getElementById('hp-fb-funnel-products-body');
+			const statusEl = document.getElementById('hp-fb-funnel-save-status');
+
+			function fmt(v){ return (typeof v === 'number' && isFinite(v)) ? v.toFixed(2) : ''; }
+
+			function renderRows(rows){
+				if (!body) return;
+				body.innerHTML = '';
+				rows.forEach(function(r, idx){
+					const disc = parseFloat(r.item_discount_percent || 0) || 0;
+					const price = parseFloat(r.price || 0) || 0;
+					const discounted = price > 0 && disc > 0 ? price * (1 - disc/100) : price;
+					const tr = document.createElement('tr');
+					tr.setAttribute('data-index', String(idx));
+					tr.innerHTML =
+						'<td>' + (r.image ? '<img src=\"'+r.image+'\" alt=\"\" style=\"width:32px;height:32px;object-fit:contain;\" />' : '') + '</td>' +
+						'<td>'+ String(r.name || '') +'</td>' +
+						'<td><code>'+ String(r.sku || '') +'</code></td>' +
+						'<td style=\"text-align:center;\">' +
+							'<select class=\"hp-fb-role\">' +
+								'<option value=\"base\"'+(r.role==='base'?' selected':'')+'>Base</option>' +
+								'<option value=\"optional\"'+(r.role==='optional'?' selected':'')+'>Optional</option>' +
+								'<option value=\"upsell\"'+(r.role==='upsell'?' selected':'')+'>Upsell</option>' +
+							'</select>' +
+						'</td>' +
+						'<td style=\"text-align:center;\"><input type=\"checkbox\" class=\"hp-fb-exclude-gd\"'+(r.exclude_global_discount ? ' checked' : '')+' /></td>' +
+						'<td style=\"text-align:right;\">$ '+ fmt(price) +'</td>' +
+						'<td style=\"text-align:center;\"><input type=\"number\" step=\"0.1\" min=\"0\" max=\"100\" class=\"hp-fb-item-disc\" value=\"'+ String(disc) +'\" style=\"width:80px;\" /></td>' +
+						'<td style=\"text-align:right;\" class=\"hp-fb-discounted-cell\">$ '+ fmt(discounted) +'</td>' +
+						'<td><button type=\"button\" class=\"button-link hp-fb-remove-row\">Remove</button>' +
+							'<input type=\"hidden\" class=\"hp-fb-product-id\" value=\"'+ String(r.product_id) +'\" />' +
+							'<input type=\"hidden\" class=\"hp-fb-sku\" value=\"'+ String(r.sku || '') +'\" />' +
+						'</td>';
+					body.appendChild(tr);
+				});
+			}
+
+			let currentRows = initialRows.slice();
+			renderRows(currentRows);
+
+			if (body) {
+				body.addEventListener('click', function(e){
+					const t = e.target;
+					if (t && t.classList.contains('hp-fb-remove-row')) {
+						const tr = t.closest('tr');
+						if (!tr) return;
+						const idx = parseInt(tr.getAttribute('data-index') || '-1', 10);
+						if (idx >= 0) {
+							currentRows.splice(idx, 1);
+							renderRows(currentRows);
+						}
+					}
+				});
+				body.addEventListener('change', function(e){
+					const t = e.target;
+					const tr = t.closest ? t.closest('tr') : null;
+					if (!tr) return;
+					const idx = parseInt(tr.getAttribute('data-index') || '-1', 10);
+					if (idx < 0 || !currentRows[idx]) return;
+					if (t.classList.contains('hp-fb-role')) {
+						currentRows[idx].role = t.value;
+					} else if (t.classList.contains('hp-fb-exclude-gd')) {
+						currentRows[idx].exclude_global_discount = t.checked ? 1 : 0;
+					} else if (t.classList.contains('hp-fb-item-disc')) {
+						const v = parseFloat(t.value || '0') || 0;
+						currentRows[idx].item_discount_percent = v;
+						// Recompute discounted cell
+						const price = parseFloat(currentRows[idx].price || 0) || 0;
+						const discounted = price > 0 && v > 0 ? price * (1 - v/100) : price;
+						const cell = tr.querySelector('.hp-fb-discounted-cell');
+						if (cell) cell.textContent = '$ ' + fmt(discounted);
+					}
+				});
+			}
+
+			function showStatus(msg, isError){
+				if (!statusEl) return;
+				statusEl.textContent = msg || '';
+				statusEl.style.color = isError ? '#c00' : '#008000';
+			}
+
+			const saveBtn = document.getElementById('hp-fb-funnel-save');
+			if (saveBtn) {
+				saveBtn.addEventListener('click', function(){
+					const globalDisc = parseFloat(document.getElementById('hp-fb-global-discount').value || '0') || 0;
+					// Refresh rows from DOM in case indexes shifted
+					const trs = body ? Array.prototype.slice.call(body.querySelectorAll('tr')) : [];
+					currentRows = trs.map(function(tr){
+						const idx = parseInt(tr.getAttribute('data-index') || '0', 10);
+						const base = initialRows[idx] || {};
+						const pid = parseInt((tr.querySelector('.hp-fb-product-id') || {}).value || '0', 10);
+						const sku = (tr.querySelector('.hp-fb-sku') || {}).value || '';
+						const roleSel = tr.querySelector('.hp-fb-role');
+						const excludeCbx = tr.querySelector('.hp-fb-exclude-gd');
+						const discInput = tr.querySelector('.hp-fb-item-disc');
+						return {
+							product_id: pid,
+							sku: sku,
+							role: roleSel ? roleSel.value : 'base',
+							exclude_global_discount: excludeCbx && excludeCbx.checked ? 1 : 0,
+							item_discount_percent: discInput ? (parseFloat(discInput.value || '0') || 0) : 0,
+						};
+					});
+					showStatus('Saving...', false);
+					const payload = {
+						action: 'hp_fb_save_funnel_config',
+						funnel_id: funnelId,
+						nonce: nonce,
+						global_discount_percent: globalDisc,
+						products: currentRows,
+					};
+					fetch(ajaxurl, {
+						method: 'POST',
+						headers: { 'Content-Type': 'application/json' },
+						body: JSON.stringify(payload),
+					})
+						.then(function(r){ return r.json(); })
+						.then(function(data){
+							if (data && data.success) {
+								showStatus('Saved.', false);
+							} else {
+								showStatus((data && data.data && data.data.message) ? data.data.message : 'Save failed', true);
+							}
+						})
+						.catch(function(){
+							showStatus('Save failed', true);
+						});
+				});
+			}
+
+			// Product search
+			const searchInput = document.getElementById('hp-fb-product-search');
+			const searchBtn = document.getElementById('hp-fb-product-search-btn');
+			const resultsBox = document.getElementById('hp-fb-product-search-results');
+			function renderSearchResults(items){
+				if (!resultsBox) return;
+				if (!items || !items.length) { resultsBox.innerHTML = '<p class=\"description\">No products found.</p>'; return; }
+				const ul = document.createElement('ul');
+				ul.style.listStyle = 'disc';
+				ul.style.marginLeft = '18px';
+				items.forEach(function(p){
+					const li = document.createElement('li');
+					li.innerHTML = '<strong>' + p.name + '</strong> <code>' + (p.sku || '') + '</code> &mdash; $ ' + fmt(p.price || 0) +
+						' <button type=\"button\" class=\"button-link hp-fb-add-product\" data-product_id=\"'+p.id+'\">Add</button>';
+					ul.appendChild(li);
+				});
+				resultsBox.innerHTML = '';
+				resultsBox.appendChild(ul);
+				resultsBox.addEventListener('click', function(e){
+					const t = e.target;
+					if (t && t.classList.contains('hp-fb-add-product')) {
+						const pid = parseInt(t.getAttribute('data-product_id') || '0', 10);
+						const prod = items.find(function(x){ return parseInt(x.id,10) === pid; });
+						if (!prod) return;
+						// Avoid duplicates
+						if (currentRows.some(function(r){ return parseInt(r.product_id,10) === pid; })) {
+							showStatus('Product already added.', true);
+							return;
+						}
+						currentRows.push({
+							product_id: pid,
+							name: prod.name,
+							sku: prod.sku || '',
+							image: prod.image || '',
+							price: prod.price || 0,
+							role: 'base',
+							exclude_global_discount: 0,
+							item_discount_percent: 0,
+						});
+						renderRows(currentRows);
+						showStatus('Product added. Don\'t forget to Save.', false);
+					}
+				}, { once: true });
+			}
+			function performSearch(){
+				const term = searchInput ? (searchInput.value || '').trim() : '';
+				if (!term) { renderSearchResults([]); return; }
+				if (resultsBox) { resultsBox.innerHTML = '<p class=\"description\">Searching&hellip;</p>'; }
+				const payload = {
+					action: 'hp_fb_search_products',
+					nonce: nonce,
+					term: term,
+				};
+				fetch(ajaxurl + '?action=hp_fb_search_products&_ajax_nonce='+encodeURIComponent(nonce)+'&term='+encodeURIComponent(term))
+					.then(function(r){ return r.json(); })
+					.then(function(data){
+						if (!data || !data.success) {
+							renderSearchResults([]);
+							return;
+						}
+						renderSearchResults(data.data || []);
+					})
+					.catch(function(){
+						renderSearchResults([]);
+					});
+			}
+			if (searchBtn) searchBtn.addEventListener('click', performSearch);
+			if (searchInput) {
+				searchInput.addEventListener('keydown', function(e){
+					if (e.key === 'Enter') {
+						e.preventDefault();
+						performSearch();
+					}
+				});
+			}
+		})();</script>
 		<?php
 	}
 }

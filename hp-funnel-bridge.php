@@ -57,6 +57,10 @@ if (is_admin()) {
 		if (class_exists('\HP_FB\Admin\Tweaks')) {
 			(new \HP_FB\Admin\Tweaks())->register();
 		}
+		// Register funnel config AJAX handlers
+		if (class_exists('\HP_FB\Admin\FunnelAjax')) {
+			\HP_FB\Admin\FunnelAjax::register();
+		}
 	});
 }
 
