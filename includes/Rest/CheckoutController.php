@@ -97,8 +97,25 @@ class CheckoutController {
 				$item = new \WC_Order_Item_Product();
 				$item->set_product($product);
 				$item->set_quantity($qty);
-				$item->set_subtotal($product->get_price() * $qty);
-				$item->set_total($product->get_price() * $qty);
+
+				$price    = (float) $product->get_price();
+				$subtotal = $price * $qty;
+				$total    = $subtotal;
+
+				$exclude_gd = !empty($it['exclude_global_discount']);
+				$item_pct   = isset($it['item_discount_percent']) ? (float) $it['item_discount_percent'] : null;
+
+				if ($item_pct !== null && $item_pct >= 0) {
+					$discounted = $price * (1 - ($item_pct / 100.0));
+					$total = max(0.0, $discounted * $qty);
+					$item->add_meta_data('_eao_item_discount_percent', $item_pct, true);
+				}
+				if ($exclude_gd) {
+					$item->add_meta_data('_eao_exclude_global_discount', '1', true);
+				}
+
+				$item->set_subtotal($subtotal);
+				$item->set_total($total);
 				$order->add_item($item);
 			}
 			// Address
@@ -125,9 +142,17 @@ class CheckoutController {
 			$fConfig = FunnelConfig::get($funnel_id);
 			$global_percent = (float)$fConfig['global_discount_percent'];
 
-			// Apply per-item overrides (exclude global, specific item discount)
+			// Apply per-item overrides (exclude global, specific item discount) from config,
+			// but only for items that don't already have explicit overrides from the payload.
 			foreach ($order->get_items() as $item) {
 				if (!$item instanceof \WC_Order_Item_Product) { continue; }
+
+				$has_explicit_exclude = (bool) $item->get_meta('_eao_exclude_global_discount', true);
+				$has_explicit_pct     = $item->get_meta('_eao_item_discount_percent', true) !== '';
+				if ($has_explicit_exclude || $has_explicit_pct) {
+					continue;
+				}
+
 				$pid = $item->get_product_id();
 				$product = $item->get_product();
 				if (!$product) { continue; }
@@ -144,6 +169,7 @@ class CheckoutController {
 						// Set subtotal to MSRP (standard WC practice) and total to discounted
 						$item->set_subtotal($regular * $qty);
 						$item->set_total($discounted * $qty);
+						$item->add_meta_data('_eao_item_discount_percent', $item_discount, true);
 					}
 					// Mark as excluded so global discount logic ignores it
 					$item->add_meta_data('_eao_exclude_global_discount', '1', true);

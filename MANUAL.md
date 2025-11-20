@@ -1,5 +1,5 @@
 # HP Funnel Bridge Plugin Manual
-**Version:** 0.2.53
+**Version:** 0.2.54
 
 ## 1. Architecture Overview
 

@@ -94,19 +94,32 @@ class WebhookController {
 			$product = Resolver::resolveProductFromItem((array)$it);
 			if (!$product) { continue; }
 
-			$is_free_bonus = !empty($it['free_bonus']);
-			$price = (float) $product->get_price();
+			$price    = (float) $product->get_price();
+			$subtotal = $price * $qty;
+			$total    = $subtotal;
+
+			$exclude_gd = !empty($it['exclude_global_discount']);
+			$item_pct   = isset($it['item_discount_percent']) ? (float) $it['item_discount_percent'] : null;
+
+			if ($item_pct !== null && $item_pct >= 0) {
+				$discounted = $price * (1 - ($item_pct / 100.0));
+				$total = max(0.0, $discounted * $qty);
+			}
 
 			if (method_exists($order, 'add_product')) {
 				$item_id = $order->add_product($product, $qty, [
-					'subtotal' => $price * $qty,
-					'total'    => $is_free_bonus ? 0.0 : $price * $qty,
+					'subtotal' => $subtotal,
+					'total'    => $total,
 				]);
-				if ($item_id && $is_free_bonus) {
+				if ($item_id) {
 					$li = $order->get_item($item_id);
 					if ($li) {
-						$li->update_meta_data('_eao_exclude_global_discount', '1');
-						$li->update_meta_data('_eao_item_discount_percent', 100.0);
+						if ($exclude_gd) {
+							$li->update_meta_data('_eao_exclude_global_discount', '1');
+						}
+						if ($item_pct !== null && $item_pct >= 0) {
+							$li->update_meta_data('_eao_item_discount_percent', $item_pct);
+						}
 						$li->save();
 					}
 				}
@@ -114,11 +127,13 @@ class WebhookController {
 				$item = new \WC_Order_Item_Product();
 				$item->set_product($product);
 				$item->set_quantity($qty);
-				$item->set_subtotal($price * $qty);
-				$item->set_total($is_free_bonus ? 0.0 : $price * $qty);
-				if ($is_free_bonus) {
+				$item->set_subtotal($subtotal);
+				$item->set_total($total);
+				if ($exclude_gd) {
 					$item->update_meta_data('_eao_exclude_global_discount', '1');
-					$item->update_meta_data('_eao_item_discount_percent', 100.0);
+				}
+				if ($item_pct !== null && $item_pct >= 0) {
+					$item->update_meta_data('_eao_item_discount_percent', $item_pct);
 				}
 				$order->add_item($item);
 			}
@@ -146,17 +161,24 @@ class WebhookController {
 		// First totals pass so WooCommerce has a baseline before we apply discounts
 		$order->calculate_totals(false);
 
-		// Now apply per-funnel discount configuration
+		// Now apply per-funnel discount configuration (fallback when payload did not specify overrides)
 		$funnel_id = isset($draft['funnel_id']) ? (string) $draft['funnel_id'] : 'default';
 		$fConfig = FunnelConfig::get($funnel_id);
 		$global_percent = (float)$fConfig['global_discount_percent'];
 
-		// Apply per-item overrides (exclude global, specific item discount)
+		// Apply per-item overrides (exclude global, specific item discount) from config,
+		// but only for items that don't already carry explicit overrides from the payload.
 		foreach ($order->get_items('line_item') as $item) {
 			$pid = $item->get_product_id();
 			$product = $item->get_product();
 			if (!$product) { continue; }
 			$sku = (string)$product->get_sku();
+
+			$has_explicit_exclude = (bool) $item->get_meta('_eao_exclude_global_discount', true);
+			$has_explicit_pct     = $item->get_meta('_eao_item_discount_percent', true) !== '';
+			if ($has_explicit_exclude || $has_explicit_pct) {
+				continue;
+			}
 			
 			$pConf = FunnelConfig::getProductConfig($fConfig, $pid, $sku);
 			if ($pConf && !empty($pConf['exclude_global_discount'])) {
@@ -171,12 +193,10 @@ class WebhookController {
 					// but we might need to re-calc tax if we were handling tax.
 					$item->set_subtotal($regular * $qty);
 					$item->set_total($discounted * $qty);
+					$item->update_meta_data('_eao_item_discount_percent', $item_discount);
 				}
 				// Mark as excluded
 				$item->add_meta_data('_eao_exclude_global_discount', '1', true);
-				if ($item_discount > 0) {
-					$item->add_meta_data('_eao_item_discount_percent', $item_discount, true);
-				}
 				$item->save();
 			}
 		}
