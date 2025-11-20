@@ -13,6 +13,22 @@ class SettingsPage {
 			[__CLASS__, 'render']
 		);
 		add_action('admin_init', [__CLASS__, 'registerSettings']);
+		// Load color picker assets on our settings page (for per-funnel payment style)
+		add_action('admin_enqueue_scripts', [__CLASS__, 'enqueueAssets']);
+	}
+
+	public static function enqueueAssets($hook): void {
+		// Only enqueue on our settings page
+		if ($hook !== 'settings_page_hp-funnel-bridge') {
+			return;
+		}
+		wp_enqueue_style('wp-color-picker');
+		wp_enqueue_script('wp-color-picker');
+		// Tiny init script for our color fields
+		wp_add_inline_script(
+			'wp-color-picker',
+			'jQuery(function($){ $(".hp-fb-color").wpColorPicker(); });'
+		);
 	}
 
 	public static function registerSettings(): void {
@@ -416,21 +432,21 @@ class SettingsPage {
 				<tr>
 					<th scope="row">Background color</th>
 					<td>
-						<input type="text" id="hp-fb-pay-bg" value="<?php echo esc_attr($style_bg); ?>" class="regular-text" />
+						<input type="text" id="hp-fb-pay-bg" value="<?php echo esc_attr($style_bg); ?>" class="regular-text hp-fb-color" />
 						<p class="description">Main page background (hex), e.g. <code>#020617</code>.</p>
 					</td>
 				</tr>
 				<tr>
 					<th scope="row">Card color</th>
 					<td>
-						<input type="text" id="hp-fb-pay-card" value="<?php echo esc_attr($style_card); ?>" class="regular-text" />
+						<input type="text" id="hp-fb-pay-card" value="<?php echo esc_attr($style_card); ?>" class="regular-text hp-fb-color" />
 						<p class="description">Payment card background (hex), e.g. <code>#0f172a</code>.</p>
 					</td>
 				</tr>
 				<tr>
 					<th scope="row">Accent color</th>
 					<td>
-						<input type="text" id="hp-fb-pay-accent" value="<?php echo esc_attr($style_accent); ?>" class="regular-text" />
+						<input type="text" id="hp-fb-pay-accent" value="<?php echo esc_attr($style_accent); ?>" class="regular-text hp-fb-color" />
 						<p class="description">Accent / button color (hex), e.g. <code>#eab308</code>.</p>
 					</td>
 				</tr>
