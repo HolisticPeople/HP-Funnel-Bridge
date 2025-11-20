@@ -508,6 +508,32 @@ class SettingsPage {
 				statusEl.style.color = isError ? '#c00' : '#008000';
 			}
 
+			// When global discount changes, immediately apply it to non-excluded items
+			// and recompute their discounted price.
+			const globalDiscInput = document.getElementById('hp-fb-global-discount');
+			if (globalDiscInput) {
+				globalDiscInput.addEventListener('input', function(){
+					const v = parseFloat(globalDiscInput.value || '0') || 0;
+					const trs = body ? Array.prototype.slice.call(body.querySelectorAll('tr')) : [];
+					trs.forEach(function(tr){
+						const excludeCbx = tr.querySelector('.hp-fb-exclude-gd');
+						if (excludeCbx && excludeCbx.checked) { return; }
+						const discInput = tr.querySelector('.hp-fb-item-disc');
+						if (discInput) {
+							discInput.value = String(v);
+						}
+						const idx = parseInt(tr.getAttribute('data-index') || '-1', 10);
+						if (idx >= 0 && currentRows[idx]) {
+							currentRows[idx].item_discount_percent = v;
+							const price = parseFloat(currentRows[idx].price || 0) || 0;
+							const discounted = price > 0 && v > 0 ? price * (1 - v/100) : price;
+							const cell = tr.querySelector('.hp-fb-discounted-cell');
+							if (cell) cell.textContent = '$ ' + fmt(discounted);
+						}
+					});
+				});
+			}
+
 			const saveBtn = document.getElementById('hp-fb-funnel-save');
 			if (saveBtn) {
 				saveBtn.addEventListener('click', function(){
@@ -532,13 +558,12 @@ class SettingsPage {
 					});
 					showStatus('Saving...', false);
 					const payload = {
-						action: 'hp_fb_save_funnel_config',
 						funnel_id: funnelId,
 						nonce: nonce,
 						global_discount_percent: globalDisc,
 						products: currentRows,
 					};
-					fetch(ajaxurl, {
+					fetch(ajaxurl + '?action=hp_fb_save_funnel_config', {
 						method: 'POST',
 						headers: { 'Content-Type': 'application/json' },
 						body: JSON.stringify(payload),
