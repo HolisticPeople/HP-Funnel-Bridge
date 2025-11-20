@@ -2,7 +2,7 @@
 /**
  * Plugin Name:       HP Funnel Bridge
  * Description:       Multi‑funnel bridge exposing REST endpoints for checkout, shipping rates, totals, and one‑click upsells. Reuses EAO (Stripe keys, ShipStation, YITH points) without modifying it.
- * Version:           0.2.59
+ * Version:           0.2.60
  * Requires at least: 6.0
  * Requires PHP:      7.4
  * Author:            Holistic People
@@ -15,7 +15,7 @@ if (!defined('ABSPATH')) {
 	exit;
 }
 
-define('HP_FB_PLUGIN_VERSION', '0.2.59');
+define('HP_FB_PLUGIN_VERSION', '0.2.60');
 define('HP_FB_PLUGIN_FILE', __FILE__);
 define('HP_FB_PLUGIN_DIR', plugin_dir_path(__FILE__));
 define('HP_FB_PLUGIN_URL', plugin_dir_url(__FILE__));
@@ -204,6 +204,23 @@ add_action('template_redirect', function () {
 	$fid = isset($_GET['fid']) ? sanitize_key((string) $_GET['fid']) : '';
 	$opts = get_option('hp_fb_settings', []);
 	$cfgs = isset($opts['funnel_configs']) && is_array($opts['funnel_configs']) ? $opts['funnel_configs'] : [];
+
+	// Fallback: if fid not present, attempt to infer funnel id from succ URL (e.g. /funnels/illumodine/)
+	if ($fid === '' && !empty($_GET['succ'])) {
+		$succ_for_fid = (string) $_GET['succ'];
+		if (strpos($succ_for_fid, '%') !== false) {
+			$succ_for_fid = rawurldecode($succ_for_fid);
+		}
+		$u = @parse_url($succ_for_fid);
+		if (is_array($u) && !empty($u['path'])) {
+			$parts = explode('/', trim((string) $u['path'], '/'));
+			$idx = array_search('funnels', $parts, true);
+			if ($idx !== false && isset($parts[$idx + 1]) && $parts[$idx + 1] !== '') {
+				$fid = sanitize_key((string) $parts[$idx + 1]);
+			}
+		}
+	}
+
 	$style_cfg = ($fid && isset($cfgs[$fid]['payment_style']) && is_array($cfgs[$fid]['payment_style'])) ? $cfgs[$fid]['payment_style'] : [];
 	$accent_color = isset($style_cfg['accent_color']) ? sanitize_hex_color($style_cfg['accent_color']) : '#eab308';
 	$bg_color     = isset($style_cfg['background_color']) ? sanitize_hex_color($style_cfg['background_color']) : '#020617';
