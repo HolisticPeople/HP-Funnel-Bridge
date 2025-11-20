@@ -54,10 +54,15 @@ class OrdersController {
 
 	/**
 	 * Get a lightweight order summary for Thank You page rendering.
-	 * GET /hp-funnel/v1/orders/summary?order_id=123
+	 * GET /hp-funnel/v1/orders/summary?order_id=123&pi_id=pi_xxx
+	 *
+	 * Security: Requires pi_id matching the order to prevent ID enumeration.
 	 */
 	public function summaryById(WP_REST_Request $request) {
 		$order_id = isset($_GET['order_id']) ? absint($_GET['order_id']) : (int) $request->get_param('order_id');
+		// Use pi_id as a security token
+		$pi_id = isset($_GET['pi_id']) ? trim($_GET['pi_id']) : (string) $request->get_param('pi_id');
+
 		if ($order_id <= 0) {
 			return new WP_REST_Response(['ok' => false, 'reason' => 'missing_order_id'], 400);
 		}
@@ -67,6 +72,19 @@ class OrdersController {
 		$order = wc_get_order($order_id);
 		if (!$order) {
 			return new WP_REST_Response(['ok' => false, 'reason' => 'not_found'], 404);
+		}
+
+		// Security check: Verify provided PI matches the order's stored PI
+		// Note: upsell charges also link to the same order but might have a different PI.
+		// We check the MAIN checkout PI or the UPSELL PI (if present)
+		$stored_pi = (string) $order->get_meta('_hp_fb_stripe_payment_intent_id', true);
+		$upsell_pi = (string) $order->get_meta('_hp_fb_upsell_payment_intent_id', true);
+		
+		$is_valid = ($pi_id !== '' && ($pi_id === $stored_pi || $pi_id === $upsell_pi));
+		
+		if (!$is_valid) {
+			// Don't leak that the order exists if token fails
+			return new WP_REST_Response(['ok' => false, 'reason' => 'forbidden'], 403);
 		}
 
 		$items = [];
@@ -135,5 +153,3 @@ class OrdersController {
 		return new WP_REST_Response($summary, 200);
 	}
 }
-
-

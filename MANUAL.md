@@ -1,5 +1,5 @@
 # HP Funnel Bridge Plugin Manual
-**Version:** 0.2.44
+**Version:** 0.2.45
 
 ## 1. Architecture Overview
 
@@ -123,7 +123,8 @@ To connect a new funnel:
 
 **GET** `/orders/summary`
 -   **Purpose**: Get full details for a Thank You page.
--   **Params**: `?order_id=12345`
+-   **Params**: `?order_id=12345&pi_id=pi_xxx`
+-   **Security**: Requires `pi_id` to match the order (acts as authorization token).
 -   **Response**: Detailed JSON with items (names, images, SKUs), financial breakdown (shipping, fees, points), and totals.
 
 ### 3.7 One-Click Upsell
@@ -133,10 +134,12 @@ To connect a new funnel:
     ```json
     {
       "parent_order_id": 12345,
+      "parent_pi_id": "pi_xxx", 
       "items": [ { "sku": "UPSELL-SKU", "qty": 1 } ],
       "funnel_name": "fastingkit"
     }
     ```
+-   **Security**: Requires `parent_pi_id` to match the order (acts as authorization token).
 -   **Response**: `{ "ok": true, "order_id": 12345 }`
 -   **Behavior**:
     -   Reuses payment method from parent order.
@@ -160,4 +163,3 @@ To connect a new funnel:
 For 3D Secure or simple payment flow completion, the Bridge includes a hosted page:
 -   **URL**: `https://YOUR_SITE/?hp_fb_confirm=1&cs=CLIENT_SECRET&pk=PUBLISHABLE_KEY`
 -   **Function**: Mounts Stripe Elements, handles final confirmation, and redirects back to the funnel (e.g., `.../funnels/fastingkit/#upsell`).
-

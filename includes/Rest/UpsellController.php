@@ -21,6 +21,7 @@ class UpsellController {
 
 	public function handle(WP_REST_Request $request) {
 		$parent_order_id = (int) ($request->get_param('parent_order_id') ?? 0);
+		$parent_pi_id = (string) ($request->get_param('parent_pi_id') ?? '');
 		$items = (array) $request->get_param('items');
 		$funnel_name = (string) ($request->get_param('funnel_name') ?? 'Funnel');
 		// Allow either explicit items OR an amount_override; at least one is required
@@ -33,6 +34,15 @@ class UpsellController {
 		if (!$parent) {
 			return new WP_Error('not_found', 'Parent order not found', ['status' => 404]);
 		}
+		
+		// Security Check: Verify parent_pi_id matches the one stored on the order
+		// This acts as a "session token" to prove the caller is the one who placed the order.
+		$stored_pi = (string) $parent->get_meta('_hp_fb_stripe_payment_intent_id', true);
+		if ($parent_pi_id === '' || $stored_pi !== $parent_pi_id) {
+			// If the order has no PI yet (e.g. manual/free), this check fails, which is intended for this funnel flow.
+			return new WP_Error('forbidden', 'Invalid or missing parent_pi_id token', ['status' => 403]);
+		}
+
 		$cus = (string) $parent->get_meta('_hp_fb_stripe_customer_id', true);
 		if ($cus === '') {
 			return new WP_Error('missing_customer', 'Parent order missing Stripe customer id', ['status' => 400]);
@@ -41,9 +51,8 @@ class UpsellController {
 		$pm_id = '';
 		try {
 			$stripe = new StripeClient();
-			$parent_pi = (string) $parent->get_meta('_hp_fb_stripe_payment_intent_id', true);
-			if ($parent_pi !== '') {
-				$pi_data = $stripe->retrievePaymentIntent($parent_pi);
+			if ($stored_pi !== '') {
+				$pi_data = $stripe->retrievePaymentIntent($stored_pi);
 				if (is_array($pi_data) && !empty($pi_data['payment_method'])) {
 					$pm_id = (string) $pi_data['payment_method'];
 				}
@@ -183,5 +192,3 @@ class UpsellController {
 		}
 	}
 }
-
-
