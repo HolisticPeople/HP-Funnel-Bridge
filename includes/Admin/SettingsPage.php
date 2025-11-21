@@ -45,8 +45,14 @@ class SettingsPage {
 				'allowed_origins' => [],
 				'funnel_registry' => [], // legacy: array of [id => name]
 				'funnels' => [], // new: array of [id, name, origin_staging, origin_production, mode_staging, mode_production]
+				// Legacy/global webhook secrets (kept for back-compat)
 				'webhook_secret_test' => '',
 				'webhook_secret_live' => '',
+				// Per-environment webhook secrets so staging/production can each have their own endpoints
+				'webhook_secret_test_staging' => '',
+				'webhook_secret_live_staging' => '',
+				'webhook_secret_test_production' => '',
+				'webhook_secret_live_production' => '',
 			],
 		]);
 		add_settings_section('hp_fb_main', 'General', '__return_false', 'hp-funnel-bridge');
@@ -166,9 +172,14 @@ class SettingsPage {
 			}
 		}
 		$out['funnel_configs'] = $funnel_configs;
-		// Webhook secrets (do not trim to avoid accidental spaces removal on paste? we will trim)
+		// Webhook secrets
 		$out['webhook_secret_test'] = isset($value['webhook_secret_test']) ? trim((string)$value['webhook_secret_test']) : '';
 		$out['webhook_secret_live'] = isset($value['webhook_secret_live']) ? trim((string)$value['webhook_secret_live']) : '';
+		// Per-environment secrets (optional; allow separate endpoints for staging vs production)
+		$out['webhook_secret_test_staging'] = isset($value['webhook_secret_test_staging']) ? trim((string)$value['webhook_secret_test_staging']) : '';
+		$out['webhook_secret_live_staging'] = isset($value['webhook_secret_live_staging']) ? trim((string)$value['webhook_secret_live_staging']) : '';
+		$out['webhook_secret_test_production'] = isset($value['webhook_secret_test_production']) ? trim((string)$value['webhook_secret_test_production']) : '';
+		$out['webhook_secret_live_production'] = isset($value['webhook_secret_live_production']) ? trim((string)$value['webhook_secret_live_production']) : '';
 		return $out;
 	}
 
@@ -302,30 +313,64 @@ class SettingsPage {
 
 	public static function fieldWebhookSecrets(): void {
 		$opts = get_option('hp_fb_settings', []);
-		$test = isset($opts['webhook_secret_test']) ? (string)$opts['webhook_secret_test'] : '';
-		$live = isset($opts['webhook_secret_live']) ? (string)$opts['webhook_secret_live'] : '';
+		// Legacy/global (still accepted)
+		$test_global = isset($opts['webhook_secret_test']) ? (string)$opts['webhook_secret_test'] : '';
+		$live_global = isset($opts['webhook_secret_live']) ? (string)$opts['webhook_secret_live'] : '';
+		// Per-environment
+		$test_stg = isset($opts['webhook_secret_test_staging']) ? (string)$opts['webhook_secret_test_staging'] : '';
+		$live_stg = isset($opts['webhook_secret_live_staging']) ? (string)$opts['webhook_secret_live_staging'] : '';
+		$test_prod = isset($opts['webhook_secret_test_production']) ? (string)$opts['webhook_secret_test_production'] : '';
+		$live_prod = isset($opts['webhook_secret_live_production']) ? (string)$opts['webhook_secret_live_production'] : '';
 		?>
 		<table class="form-table">
 			<tr>
-				<th scope="row">Test signing secret</th>
+				<th scope="row">Global Test signing secret (legacy)</th>
 				<td>
-					<input type="text" name="hp_fb_settings[webhook_secret_test]" value="<?php echo esc_attr($test); ?>" size="60" autocomplete="off" />
-					<p class="description">From Stripe → Developers → Webhooks → switch to <strong>Test mode</strong>, open your <em>staging</em> Bridge endpoint, then click “Reveal signing secret”.</p>
+					<input type="text" name="hp_fb_settings[webhook_secret_test]" value="<?php echo esc_attr($test_global); ?>" size="60" autocomplete="off" />
+					<p class="description">Optional global Test secret used for back-compat. You can leave this empty and use the per-environment secrets below instead.</p>
 				</td>
 			</tr>
 			<tr>
-				<th scope="row">Live signing secret</th>
+				<th scope="row">Global Live signing secret (legacy)</th>
 				<td>
-					<input type="text" name="hp_fb_settings[webhook_secret_live]" value="<?php echo esc_attr($live); ?>" size="60" autocomplete="off" />
-					<p class="description">From Stripe → Developers → Webhooks → switch to <strong>Live mode</strong>, open your <em>production</em> Bridge endpoint, then click “Reveal signing secret”.</p>
+					<input type="text" name="hp_fb_settings[webhook_secret_live]" value="<?php echo esc_attr($live_global); ?>" size="60" autocomplete="off" />
+					<p class="description">Optional global Live secret used for back-compat. You can leave this empty and use the per-environment secrets below instead.</p>
+				</td>
+			</tr>
+			<tr>
+				<th scope="row">Staging: Test signing secret</th>
+				<td>
+					<input type="text" name="hp_fb_settings[webhook_secret_test_staging]" value="<?php echo esc_attr($test_stg); ?>" size="60" autocomplete="off" />
+					<p class="description">From Stripe → Developers → Webhooks → <strong>Test mode</strong>, open your <em>staging</em> Bridge endpoint and click “Reveal signing secret”.</p>
+				</td>
+			</tr>
+			<tr>
+				<th scope="row">Staging: Live signing secret</th>
+				<td>
+					<input type="text" name="hp_fb_settings[webhook_secret_live_staging]" value="<?php echo esc_attr($live_stg); ?>" size="60" autocomplete="off" />
+					<p class="description">If you ever run Live-mode tests on staging, store the Live secret for the <em>staging</em> Bridge endpoint here.</p>
+				</td>
+			</tr>
+			<tr>
+				<th scope="row">Production: Test signing secret</th>
+				<td>
+					<input type="text" name="hp_fb_settings[webhook_secret_test_production]" value="<?php echo esc_attr($test_prod); ?>" size="60" autocomplete="off" />
+					<p class="description">If you have a Test-mode webhook endpoint pointing at Production (for example, after a clone), put its Test secret here.</p>
+				</td>
+			</tr>
+			<tr>
+				<th scope="row">Production: Live signing secret</th>
+				<td>
+					<input type="text" name="hp_fb_settings[webhook_secret_live_production]" value="<?php echo esc_attr($live_prod); ?>" size="60" autocomplete="off" />
+					<p class="description">From Stripe → Developers → Webhooks → <strong>Live mode</strong>, open your <em>production</em> Bridge endpoint and click “Reveal signing secret”.</p>
 				</td>
 			</tr>
 		</table>
 		<p class="description">
 			<strong>Note:</strong> Stripe keeps <em>separate</em> webhook endpoints and signing secrets for Test and Live modes.
-			If you periodically clone Production to Staging, store <strong>both</strong> secrets here so the Bridge can verify
-			events in either environment without breaking after a clone. The Bridge will accept a signature that matches
-			<em>either</em> secret.
+			If you periodically clone Production to Staging, store the secrets for <strong>each</strong> endpoint (staging + production,
+			test + live) so the Bridge can verify events in the correct environment without breaking after a clone. The Bridge will
+			accept a signature that matches any configured secret.
 		</p>
 		<?php
 	}

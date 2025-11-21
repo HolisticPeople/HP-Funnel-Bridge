@@ -346,22 +346,29 @@ class WebhookController {
 
 	/**
 	 * If webhook signing secrets are configured, verify Stripe-Signature header.
-	 * Accepts either the test or live secret (so it works across modes).
+	 * Accepts any configured secret (global or per-environment), so it works across
+	 * staging/production clones and Test/Live modes.
 	 * Returns true if verification passes or if no secret is configured.
 	 */
 	private function verifyStripeSignatureIfConfigured(string $payload): bool {
 		$opts = get_option('hp_fb_settings', []);
+		// Legacy/global secrets
 		$test = isset($opts['webhook_secret_test']) ? trim((string)$opts['webhook_secret_test']) : '';
 		$live = isset($opts['webhook_secret_live']) ? trim((string)$opts['webhook_secret_live']) : '';
+		// Per-environment secrets (optional)
+		$test_stg  = isset($opts['webhook_secret_test_staging']) ? trim((string)$opts['webhook_secret_test_staging']) : '';
+		$live_stg  = isset($opts['webhook_secret_live_staging']) ? trim((string)$opts['webhook_secret_live_staging']) : '';
+		$test_prod = isset($opts['webhook_secret_test_production']) ? trim((string)$opts['webhook_secret_test_production']) : '';
+		$live_prod = isset($opts['webhook_secret_live_production']) ? trim((string)$opts['webhook_secret_live_production']) : '';
 		// If neither secret is set, do not enforce verification (keeps staging flexible)
-		if ($test === '' && $live === '') {
+		if ($test === '' && $live === '' && $test_stg === '' && $live_stg === '' && $test_prod === '' && $live_prod === '') {
 			return true;
 		}
 		$sigHeader = isset($_SERVER['HTTP_STRIPE_SIGNATURE']) ? (string)$_SERVER['HTTP_STRIPE_SIGNATURE'] : '';
 		if ($sigHeader === '') {
 			return false;
 		}
-		$secrets = array_filter([$test, $live], function($v){ return $v !== ''; });
+		$secrets = array_filter([$test, $live, $test_stg, $live_stg, $test_prod, $live_prod], function($v){ return $v !== ''; });
 		foreach ($secrets as $secret) {
 			if ($this->verifyStripeSig($payload, $sigHeader, $secret)) {
 				return true;
