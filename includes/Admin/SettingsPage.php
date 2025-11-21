@@ -578,9 +578,15 @@ class SettingsPage {
 			function fmt(v){ return (typeof v === 'number' && isFinite(v)) ? v.toFixed(2) : ''; }
 
 			// Favicon media picker
-			if (faviconBtn && window.wp && window.wp.media) {
+			if (faviconBtn) {
 				faviconBtn.addEventListener('click', function(e){
 					e.preventDefault();
+					// Ensure media library is available
+					if (typeof wp === 'undefined' || !wp.media) {
+						// Graceful no-op if media scripts failed to load
+						console.warn('HP Funnel Bridge: wp.media is not available for favicon picker.');
+						return;
+					}
 					if (faviconFrame) {
 						faviconFrame.open();
 						return;
@@ -592,7 +598,11 @@ class SettingsPage {
 						library: { type: 'image' }
 					});
 					faviconFrame.on('select', function(){
-						const attachment = faviconFrame.state().get('selection').first().toJSON();
+						const selection = faviconFrame.state().get('selection');
+						if (!selection) return;
+						const first = selection.first();
+						if (!first) return;
+						const attachment = first.toJSON();
 						if (!attachment) return;
 						if (faviconIdInput) {
 							faviconIdInput.value = attachment.id || '';
