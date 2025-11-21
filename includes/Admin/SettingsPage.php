@@ -45,9 +45,6 @@ class SettingsPage {
 				'allowed_origins' => [],
 				'funnel_registry' => [], // legacy: array of [id => name]
 				'funnels' => [], // new: array of [id, name, origin_staging, origin_production, mode_staging, mode_production]
-				// Legacy/global webhook secrets (kept for back-compat)
-				'webhook_secret_test' => '',
-				'webhook_secret_live' => '',
 				// Per-environment webhook secrets so staging/production can each have their own endpoints
 				'webhook_secret_test_staging' => '',
 				'webhook_secret_live_staging' => '',
@@ -172,10 +169,7 @@ class SettingsPage {
 			}
 		}
 		$out['funnel_configs'] = $funnel_configs;
-		// Webhook secrets
-		$out['webhook_secret_test'] = isset($value['webhook_secret_test']) ? trim((string)$value['webhook_secret_test']) : '';
-		$out['webhook_secret_live'] = isset($value['webhook_secret_live']) ? trim((string)$value['webhook_secret_live']) : '';
-		// Per-environment secrets (optional; allow separate endpoints for staging vs production)
+		// Per-environment webhook secrets (allow separate endpoints for staging vs production)
 		$out['webhook_secret_test_staging'] = isset($value['webhook_secret_test_staging']) ? trim((string)$value['webhook_secret_test_staging']) : '';
 		$out['webhook_secret_live_staging'] = isset($value['webhook_secret_live_staging']) ? trim((string)$value['webhook_secret_live_staging']) : '';
 		$out['webhook_secret_test_production'] = isset($value['webhook_secret_test_production']) ? trim((string)$value['webhook_secret_test_production']) : '';
@@ -313,9 +307,6 @@ class SettingsPage {
 
 	public static function fieldWebhookSecrets(): void {
 		$opts = get_option('hp_fb_settings', []);
-		// Legacy/global (still accepted)
-		$test_global = isset($opts['webhook_secret_test']) ? (string)$opts['webhook_secret_test'] : '';
-		$live_global = isset($opts['webhook_secret_live']) ? (string)$opts['webhook_secret_live'] : '';
 		// Per-environment
 		$test_stg = isset($opts['webhook_secret_test_staging']) ? (string)$opts['webhook_secret_test_staging'] : '';
 		$live_stg = isset($opts['webhook_secret_live_staging']) ? (string)$opts['webhook_secret_live_staging'] : '';
@@ -323,20 +314,6 @@ class SettingsPage {
 		$live_prod = isset($opts['webhook_secret_live_production']) ? (string)$opts['webhook_secret_live_production'] : '';
 		?>
 		<table class="form-table">
-			<tr>
-				<th scope="row">Global Test signing secret (legacy)</th>
-				<td>
-					<input type="text" name="hp_fb_settings[webhook_secret_test]" value="<?php echo esc_attr($test_global); ?>" size="60" autocomplete="off" />
-					<p class="description">Optional global Test secret used for back-compat. You can leave this empty and use the per-environment secrets below instead.</p>
-				</td>
-			</tr>
-			<tr>
-				<th scope="row">Global Live signing secret (legacy)</th>
-				<td>
-					<input type="text" name="hp_fb_settings[webhook_secret_live]" value="<?php echo esc_attr($live_global); ?>" size="60" autocomplete="off" />
-					<p class="description">Optional global Live secret used for back-compat. You can leave this empty and use the per-environment secrets below instead.</p>
-				</td>
-			</tr>
 			<tr>
 				<th scope="row">Staging: Test signing secret</th>
 				<td>

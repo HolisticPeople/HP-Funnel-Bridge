@@ -1,5 +1,5 @@
 # HP Funnel Bridge Plugin Manual
-**Version:** 0.2.62
+**Version:** 0.2.63
 
 ## 1. Architecture Overview
 
@@ -52,22 +52,16 @@ To connect a new funnel:
 ### 2.4 Webhook Signing Secrets (per environment)
 
 Because each Stripe webhook endpoint has its own signing secret, and you typically have
-separate endpoints for **staging** and **production**, the Bridge lets you store secrets
+separate endpoints for **staging** and **production**, the Bridge stores secrets
 per environment and per Stripe mode (Test / Live).
 
-On the HP Funnel Bridge settings page you’ll see:
-
-- Global (legacy) secrets:
-  - **Global Test signing secret**
-  - **Global Live signing secret**
-- Per-environment secrets:
+On the HP Funnel Bridge settings page you’ll see only per-environment secrets:
   - **Staging: Test signing secret**
   - **Staging: Live signing secret**
   - **Production: Test signing secret**
   - **Production: Live signing secret**
 
-You can leave the global fields empty and just use the per-environment ones. The webhook
-verifier will accept a signature that matches **any** configured secret, which makes it
+The webhook verifier will accept a signature that matches **any** configured secret, which makes it
 safe to clone Production → Staging without breaking existing endpoints.
 
 ### 2.5 Development Guidelines
