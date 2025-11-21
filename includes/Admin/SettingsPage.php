@@ -113,10 +113,16 @@ class SettingsPage {
 		}
 		$out['funnels'] = $funnels;
 		// Preserve and lightly sanitize per-funnel configs (used by the Funnel Config UI).
-		// This structure is not edited via the main settings form, but when the user
-		// saves global settings we don't want to lose previously stored configs.
-		$funnel_configs = [];
+		// This structure is not edited via the main settings form, so when the user
+		// saves global settings we must NOT wipe previously stored configs.
+		$existing_opts = get_option('hp_fb_settings', []);
+		$existing_configs = isset($existing_opts['funnel_configs']) && is_array($existing_opts['funnel_configs'])
+			? $existing_opts['funnel_configs']
+			: [];
+		$funnel_configs = $existing_configs;
 		if (!empty($value['funnel_configs']) && is_array($value['funnel_configs'])) {
+			// When funnel_configs is explicitly provided (e.g. via AJAX save), rebuild only from payload.
+			$funnel_configs = [];
 			foreach ($value['funnel_configs'] as $fid => $cfg) {
 				$fid_key = sanitize_key((string)$fid);
 				if ($fid_key === '' || !is_array($cfg)) { continue; }
@@ -475,21 +481,27 @@ class SettingsPage {
 					<th scope="row">Background color</th>
 					<td>
 						<input type="text" id="hp-fb-pay-bg" value="<?php echo esc_attr($style_bg); ?>" class="regular-text hp-fb-color" />
-						<p class="description">Main page background (hex), e.g. <code>#020617</code>.</p>
+						<p class="description">
+							Main page background (hex), e.g. <code>#020617</code>. Current: <code><?php echo esc_html($style_bg); ?></code>
+						</p>
 					</td>
 				</tr>
 				<tr>
 					<th scope="row">Card color</th>
 					<td>
 						<input type="text" id="hp-fb-pay-card" value="<?php echo esc_attr($style_card); ?>" class="regular-text hp-fb-color" />
-						<p class="description">Payment card background (hex), e.g. <code>#0f172a</code>.</p>
+						<p class="description">
+							Payment card background (hex), e.g. <code>#0f172a</code>. Current: <code><?php echo esc_html($style_card); ?></code>
+						</p>
 					</td>
 				</tr>
 				<tr>
 					<th scope="row">Accent color</th>
 					<td>
 						<input type="text" id="hp-fb-pay-accent" value="<?php echo esc_attr($style_accent); ?>" class="regular-text hp-fb-color" />
-						<p class="description">Accent / button color (hex), e.g. <code>#eab308</code>.</p>
+						<p class="description">
+							Accent / button color (hex), e.g. <code>#eab308</code>. Current: <code><?php echo esc_html($style_accent); ?></code>
+						</p>
 					</td>
 				</tr>
 			</table>
