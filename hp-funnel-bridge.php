@@ -330,3 +330,13 @@ add_filter('redirect_canonical', function ($redirect_url) {
 	}
 	return $redirect_url;
 });
+
+// Fix case sensitivity for Illumodine funnel
+add_action('init', function () {
+	$req = $_SERVER['REQUEST_URI'] ?? '';
+	if (strpos($req, '/funnels/Illumodine') !== false) {
+		$new = str_replace('/funnels/Illumodine', '/funnels/illumodine', $req);
+		wp_redirect($new, 301);
+		exit;
+	}
+});
