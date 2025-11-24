@@ -1,5 +1,5 @@
 # HP Funnel Bridge Plugin Manual
-**Version:** 0.2.46
+**Version:** 0.2.64
 
 ## 1. Architecture Overview
 
@@ -49,7 +49,22 @@ To connect a new funnel:
     -   Select events: `payment_intent.succeeded`.
     -   Copy the **Signing Secret** (`whsec_...`) to **HP Funnel Bridge Settings** (store separate secrets for Test and Live modes).
 
-### 2.4 Development Guidelines
+### 2.4 Webhook Signing Secrets (per environment)
+
+Because each Stripe webhook endpoint has its own signing secret, and you typically have
+separate endpoints for **staging** and **production**, the Bridge stores secrets
+per environment and per Stripe mode (Test / Live).
+
+On the HP Funnel Bridge settings page you’ll see only per-environment secrets:
+  - **Staging: Test signing secret**
+  - **Staging: Live signing secret**
+  - **Production: Test signing secret**
+  - **Production: Live signing secret**
+
+The webhook verifier will accept a signature that matches **any** configured secret, which makes it
+safe to clone Production → Staging without breaking existing endpoints.
+
+### 2.5 Development Guidelines
 -   **Products**: Use **SKUs** in frontend API calls, not IDs. This allows product IDs to change between staging/prod without breaking the funnel.
 -   **Pricing**: Do not hardcode prices in React. Use the `/catalog/prices` endpoint to fetch MSRP and calculate discounts dynamically.
 -   **Images**: Use optimized assets. The Bridge returns product thumbnail URLs in order summaries.

@@ -13,6 +13,27 @@ class SettingsPage {
 			[__CLASS__, 'render']
 		);
 		add_action('admin_init', [__CLASS__, 'registerSettings']);
+		// Load color picker assets on our settings page (for per-funnel payment style)
+		add_action('admin_enqueue_scripts', [__CLASS__, 'enqueueAssets']);
+	}
+
+	public static function enqueueAssets($hook): void {
+		// Only enqueue on our settings page
+		if ($hook !== 'settings_page_hp-funnel-bridge') {
+			return;
+		}
+		// Color pickers for hosted payment style
+		wp_enqueue_style('wp-color-picker');
+		wp_enqueue_script('wp-color-picker');
+		// Media library for favicon picker
+		if (function_exists('wp_enqueue_media')) {
+			wp_enqueue_media();
+		}
+		// Tiny init script for our color fields
+		wp_add_inline_script(
+			'wp-color-picker',
+			'jQuery(function($){ $(".hp-fb-color").wpColorPicker(); });'
+		);
 	}
 
 	public static function registerSettings(): void {
@@ -24,8 +45,11 @@ class SettingsPage {
 				'allowed_origins' => [],
 				'funnel_registry' => [], // legacy: array of [id => name]
 				'funnels' => [], // new: array of [id, name, origin_staging, origin_production, mode_staging, mode_production]
-				'webhook_secret_test' => '',
-				'webhook_secret_live' => '',
+				// Per-environment webhook secrets so staging/production can each have their own endpoints
+				'webhook_secret_test_staging' => '',
+				'webhook_secret_live_staging' => '',
+				'webhook_secret_test_production' => '',
+				'webhook_secret_live_production' => '',
 			],
 		]);
 		add_settings_section('hp_fb_main', 'General', '__return_false', 'hp-funnel-bridge');
@@ -89,10 +113,16 @@ class SettingsPage {
 		}
 		$out['funnels'] = $funnels;
 		// Preserve and lightly sanitize per-funnel configs (used by the Funnel Config UI).
-		// This structure is not edited via the main settings form, but when the user
-		// saves global settings we don't want to lose previously stored configs.
-		$funnel_configs = [];
+		// This structure is not edited via the main settings form, so when the user
+		// saves global settings we must NOT wipe previously stored configs.
+		$existing_opts = get_option('hp_fb_settings', []);
+		$existing_configs = isset($existing_opts['funnel_configs']) && is_array($existing_opts['funnel_configs'])
+			? $existing_opts['funnel_configs']
+			: [];
+		$funnel_configs = $existing_configs;
 		if (!empty($value['funnel_configs']) && is_array($value['funnel_configs'])) {
+			// When funnel_configs is explicitly provided (e.g. via AJAX save), rebuild only from payload.
+			$funnel_configs = [];
 			foreach ($value['funnel_configs'] as $fid => $cfg) {
 				$fid_key = sanitize_key((string)$fid);
 				if ($fid_key === '' || !is_array($cfg)) { continue; }
@@ -116,13 +146,40 @@ class SettingsPage {
 						];
 					}
 				}
+				// Preserve simple payment_style colors if present
+				$row['payment_style'] = [];
+				if (!empty($cfg['payment_style']) && is_array($cfg['payment_style'])) {
+					$ps = $cfg['payment_style'];
+					if (!empty($ps['background_color'])) {
+						$row['payment_style']['background_color'] = sanitize_hex_color((string)$ps['background_color']);
+					}
+					if (!empty($ps['card_color'])) {
+						$row['payment_style']['card_color'] = sanitize_hex_color((string)$ps['card_color']);
+					}
+					if (!empty($ps['accent_color'])) {
+						$row['payment_style']['accent_color'] = sanitize_hex_color((string)$ps['accent_color']);
+					}
+				}
+				// Preserve optional branding (favicon + social text)
+				$row['branding'] = [];
+				if (!empty($cfg['branding']) && is_array($cfg['branding'])) {
+					$br = $cfg['branding'];
+					if (!empty($br['favicon_id'])) {
+						$row['branding']['favicon_id'] = (int) $br['favicon_id'];
+					}
+					if (isset($br['social_text'])) {
+						$row['branding']['social_text'] = sanitize_text_field((string) $br['social_text']);
+					}
+				}
 				$funnel_configs[$fid_key] = $row;
 			}
 		}
 		$out['funnel_configs'] = $funnel_configs;
-		// Webhook secrets (do not trim to avoid accidental spaces removal on paste? we will trim)
-		$out['webhook_secret_test'] = isset($value['webhook_secret_test']) ? trim((string)$value['webhook_secret_test']) : '';
-		$out['webhook_secret_live'] = isset($value['webhook_secret_live']) ? trim((string)$value['webhook_secret_live']) : '';
+		// Per-environment webhook secrets (allow separate endpoints for staging vs production)
+		$out['webhook_secret_test_staging'] = isset($value['webhook_secret_test_staging']) ? trim((string)$value['webhook_secret_test_staging']) : '';
+		$out['webhook_secret_live_staging'] = isset($value['webhook_secret_live_staging']) ? trim((string)$value['webhook_secret_live_staging']) : '';
+		$out['webhook_secret_test_production'] = isset($value['webhook_secret_test_production']) ? trim((string)$value['webhook_secret_test_production']) : '';
+		$out['webhook_secret_live_production'] = isset($value['webhook_secret_live_production']) ? trim((string)$value['webhook_secret_live_production']) : '';
 		return $out;
 	}
 
@@ -256,30 +313,47 @@ class SettingsPage {
 
 	public static function fieldWebhookSecrets(): void {
 		$opts = get_option('hp_fb_settings', []);
-		$test = isset($opts['webhook_secret_test']) ? (string)$opts['webhook_secret_test'] : '';
-		$live = isset($opts['webhook_secret_live']) ? (string)$opts['webhook_secret_live'] : '';
+		// Per-environment
+		$test_stg = isset($opts['webhook_secret_test_staging']) ? (string)$opts['webhook_secret_test_staging'] : '';
+		$live_stg = isset($opts['webhook_secret_live_staging']) ? (string)$opts['webhook_secret_live_staging'] : '';
+		$test_prod = isset($opts['webhook_secret_test_production']) ? (string)$opts['webhook_secret_test_production'] : '';
+		$live_prod = isset($opts['webhook_secret_live_production']) ? (string)$opts['webhook_secret_live_production'] : '';
 		?>
 		<table class="form-table">
 			<tr>
-				<th scope="row">Test signing secret</th>
+				<th scope="row">Staging: Test signing secret</th>
 				<td>
-					<input type="text" name="hp_fb_settings[webhook_secret_test]" value="<?php echo esc_attr($test); ?>" size="60" autocomplete="off" />
-					<p class="description">From Stripe → Developers → Webhooks → switch to <strong>Test mode</strong>, open your <em>staging</em> Bridge endpoint, then click “Reveal signing secret”.</p>
+					<input type="text" name="hp_fb_settings[webhook_secret_test_staging]" value="<?php echo esc_attr($test_stg); ?>" size="60" autocomplete="off" />
+					<p class="description">From Stripe → Developers → Webhooks → <strong>Test mode</strong>, open your <em>staging</em> Bridge endpoint and click “Reveal signing secret”.</p>
 				</td>
 			</tr>
 			<tr>
-				<th scope="row">Live signing secret</th>
+				<th scope="row">Staging: Live signing secret</th>
 				<td>
-					<input type="text" name="hp_fb_settings[webhook_secret_live]" value="<?php echo esc_attr($live); ?>" size="60" autocomplete="off" />
-					<p class="description">From Stripe → Developers → Webhooks → switch to <strong>Live mode</strong>, open your <em>production</em> Bridge endpoint, then click “Reveal signing secret”.</p>
+					<input type="text" name="hp_fb_settings[webhook_secret_live_staging]" value="<?php echo esc_attr($live_stg); ?>" size="60" autocomplete="off" />
+					<p class="description">If you ever run Live-mode tests on staging, store the Live secret for the <em>staging</em> Bridge endpoint here.</p>
+				</td>
+			</tr>
+			<tr>
+				<th scope="row">Production: Test signing secret</th>
+				<td>
+					<input type="text" name="hp_fb_settings[webhook_secret_test_production]" value="<?php echo esc_attr($test_prod); ?>" size="60" autocomplete="off" />
+					<p class="description">If you have a Test-mode webhook endpoint pointing at Production (for example, after a clone), put its Test secret here.</p>
+				</td>
+			</tr>
+			<tr>
+				<th scope="row">Production: Live signing secret</th>
+				<td>
+					<input type="text" name="hp_fb_settings[webhook_secret_live_production]" value="<?php echo esc_attr($live_prod); ?>" size="60" autocomplete="off" />
+					<p class="description">From Stripe → Developers → Webhooks → <strong>Live mode</strong>, open your <em>production</em> Bridge endpoint and click “Reveal signing secret”.</p>
 				</td>
 			</tr>
 		</table>
 		<p class="description">
 			<strong>Note:</strong> Stripe keeps <em>separate</em> webhook endpoints and signing secrets for Test and Live modes.
-			If you periodically clone Production to Staging, store <strong>both</strong> secrets here so the Bridge can verify
-			events in either environment without breaking after a clone. The Bridge will accept a signature that matches
-			<em>either</em> secret.
+			If you periodically clone Production to Staging, store the secrets for <strong>each</strong> endpoint (staging + production,
+			test + live) so the Bridge can verify events in the correct environment without breaking after a clone. The Bridge will
+			accept a signature that matches any configured secret.
 		</p>
 		<?php
 	}
@@ -334,6 +408,14 @@ class SettingsPage {
 		$name = isset($funnel['name']) ? (string)$funnel['name'] : $funnel_id;
 		$config = isset($cfgs[$funnel_id]) && is_array($cfgs[$funnel_id]) ? $cfgs[$funnel_id] : [];
 		$global_disc = isset($config['global_discount_percent']) ? (float)$config['global_discount_percent'] : 0.0;
+		$style_cfg = isset($config['payment_style']) && is_array($config['payment_style']) ? $config['payment_style'] : [];
+		$style_accent = isset($style_cfg['accent_color']) ? (string)$style_cfg['accent_color'] : '#eab308';
+		$style_bg     = isset($style_cfg['background_color']) ? (string)$style_cfg['background_color'] : '#020617';
+		$style_card   = isset($style_cfg['card_color']) ? (string)$style_cfg['card_color'] : '#0f172a';
+		$branding_cfg = isset($config['branding']) && is_array($config['branding']) ? $config['branding'] : [];
+		$favicon_id   = isset($branding_cfg['favicon_id']) ? (int) $branding_cfg['favicon_id'] : 0;
+		$favicon_url  = $favicon_id > 0 ? wp_get_attachment_image_url($favicon_id, 'thumbnail') : '';
+		$social_text  = isset($branding_cfg['social_text']) ? (string) $branding_cfg['social_text'] : '';
 		$products_cfg = isset($config['products']) && is_array($config['products']) ? $config['products'] : [];
 		// Preload product data for existing rows.
 		$rows = [];
@@ -373,7 +455,8 @@ class SettingsPage {
 		?>
 		<div class="wrap hp-fb-funnel-config">
 			<h1>HP Funnel: <?php echo esc_html($name); ?></h1>
-			<p style="margin: -6px 0 10px; color:#666;">Funnel ID: <code><?php echo esc_html($funnel_id); ?></code></p>
+			<p style="margin: -6px 0 4px; color:#666;">Funnel ID: <code><?php echo esc_html($funnel_id); ?></code></p>
+			<p style="margin: 0 0 10px; color:#666;">Bridge version <?php echo esc_html( defined('HP_FB_PLUGIN_VERSION') ? HP_FB_PLUGIN_VERSION : '' ); ?></p>
 			<p><a href="<?php echo esc_url( admin_url('options-general.php?page=hp-funnel-bridge') ); ?>" class="button">&larr; Back to Funnel Registry</a></p>
 
 			<hr />
@@ -391,11 +474,69 @@ class SettingsPage {
 				</tr>
 			</table>
 
+			<h3>Hosted payment page style</h3>
+			<p class="description">Customize the hosted Stripe payment step for this funnel. These colors affect the background, card, and primary button around the Payment Element.</p>
+			<table class="form-table">
+				<tr>
+					<th scope="row">Background color</th>
+					<td>
+						<input type="text" id="hp-fb-pay-bg" value="<?php echo esc_attr($style_bg); ?>" class="regular-text hp-fb-color" />
+						<p class="description">
+							Main page background (hex), e.g. <code>#020617</code>. Current: <code><?php echo esc_html($style_bg); ?></code>
+						</p>
+					</td>
+				</tr>
+				<tr>
+					<th scope="row">Card color</th>
+					<td>
+						<input type="text" id="hp-fb-pay-card" value="<?php echo esc_attr($style_card); ?>" class="regular-text hp-fb-color" />
+						<p class="description">
+							Payment card background (hex), e.g. <code>#0f172a</code>. Current: <code><?php echo esc_html($style_card); ?></code>
+						</p>
+					</td>
+				</tr>
+				<tr>
+					<th scope="row">Accent color</th>
+					<td>
+						<input type="text" id="hp-fb-pay-accent" value="<?php echo esc_attr($style_accent); ?>" class="regular-text hp-fb-color" />
+						<p class="description">
+							Accent / button color (hex), e.g. <code>#eab308</code>. Current: <code><?php echo esc_html($style_accent); ?></code>
+						</p>
+					</td>
+				</tr>
+			</table>
+
+			<h3>Branding &amp; Social</h3>
+			<p class="description">Optional per-funnel branding used by hosted pages and funnels (favicon and default social share text).</p>
+			<table class="form-table">
+				<tr>
+					<th scope="row">Favicon</th>
+					<td>
+						<input type="hidden" id="hp-fb-favicon-id" value="<?php echo esc_attr($favicon_id); ?>" />
+						<button type="button" class="button" id="hp-fb-favicon-btn">Choose favicon</button>
+						<span id="hp-fb-favicon-preview" style="margin-left:10px; vertical-align:middle;">
+							<?php if ($favicon_id && $favicon_url): ?>
+								<img src="<?php echo esc_url($favicon_url); ?>" alt="" style="width:32px;height:32px;object-fit:contain;border-radius:4px;border:1px solid #ccd0d4;" />
+							<?php else: ?>
+								<span class="description">No favicon selected.</span>
+							<?php endif; ?>
+						</span>
+						<p class="description">Small square icon used for browser tab / social previews. Recommended 32x32px PNG.</p>
+					</td>
+				</tr>
+				<tr>
+					<th scope="row">Social share text</th>
+					<td>
+						<textarea id="hp-fb-social-text" rows="2" cols="60" class="large-text"><?php echo esc_textarea($social_text); ?></textarea>
+						<p class="description">Optional default text for social network share links (e.g., Facebook/Twitter). Funnels can read this via the Bridge config.</p>
+					</td>
+				</tr>
+			</table>
+
 			<h3>Products</h3>
 			<p>
 				<label for="hp-fb-product-search">Search products by name or SKU:</label><br />
-				<input type="search" id="hp-fb-product-search" style="min-width:260px;" placeholder="Start typing to search&hellip;" />
-				<button type="button" class="button" id="hp-fb-product-search-btn">Search</button>
+				<input type="search" id="hp-fb-product-search" style="min-width:260px;" placeholder="Type at least 3 characters to search&hellip;" />
 			</p>
 			<div id="hp-fb-product-search-results" style="margin-bottom:12px;"></div>
 
@@ -429,8 +570,84 @@ class SettingsPage {
 			const initialRows = <?php echo wp_json_encode($rows); ?>;
 			const body = document.getElementById('hp-fb-funnel-products-body');
 			const statusEl = document.getElementById('hp-fb-funnel-save-status');
+			const faviconIdInput = document.getElementById('hp-fb-favicon-id');
+			const faviconPreview = document.getElementById('hp-fb-favicon-preview');
+			const faviconBtn = document.getElementById('hp-fb-favicon-btn');
+			let faviconFrame = null;
 
 			function fmt(v){ return (typeof v === 'number' && isFinite(v)) ? v.toFixed(2) : ''; }
+
+			// Favicon media picker
+			if (faviconBtn) {
+				faviconBtn.addEventListener('click', function(e){
+					e.preventDefault();
+					// Ensure media library is available
+					if (typeof wp === 'undefined' || !wp.media) {
+						// Graceful no-op if media scripts failed to load
+						console.warn('HP Funnel Bridge: wp.media is not available for favicon picker.');
+						return;
+					}
+					if (faviconFrame) {
+						faviconFrame.open();
+						return;
+					}
+					faviconFrame = wp.media({
+						title: 'Select favicon',
+						button: { text: 'Use this icon' },
+						multiple: false,
+						library: { type: 'image' }
+					});
+					faviconFrame.on('select', function(){
+						const selection = faviconFrame.state().get('selection');
+						if (!selection) return;
+						const first = selection.first();
+						if (!first) return;
+						const attachment = first.toJSON();
+						if (!attachment) return;
+						if (faviconIdInput) {
+							faviconIdInput.value = attachment.id || '';
+						}
+						if (faviconPreview) {
+							const thumb = attachment.sizes && attachment.sizes.thumbnail ? attachment.sizes.thumbnail.url : attachment.url;
+							faviconPreview.innerHTML = '<img src="'+ String(thumb || '') +'" alt="" style="width:32px;height:32px;object-fit:contain;border-radius:4px;border:1px solid #ccd0d4;" />';
+						}
+					});
+					faviconFrame.open();
+				});
+			}
+
+			function syncRowUI(row, tr){
+				if (!tr || !row) return;
+				const globalInput = document.getElementById('hp-fb-global-discount');
+				const globalDisc = parseFloat(globalInput && globalInput.value ? globalInput.value : '0') || 0;
+				const excludeCbx = tr.querySelector('.hp-fb-exclude-gd');
+				const isExcluded = !!(excludeCbx && excludeCbx.checked);
+				const discInput = tr.querySelector('.hp-fb-item-disc');
+				const discSpan = tr.querySelector('.hp-fb-disc-display');
+				const priceSpan = tr.querySelector('.hp-fb-disc-price-display');
+				const discPriceInput = tr.querySelector('.hp-fb-discounted-input');
+				let percent = isExcluded ? (parseFloat(row.item_discount_percent || 0) || 0) : globalDisc;
+				if (!isFinite(percent)) percent = 0;
+				row.item_discount_percent = percent;
+				if (discInput) discInput.value = String(percent);
+				const price = parseFloat(row.price || 0) || 0;
+				const discounted = price > 0 && percent > 0 ? price * (percent >= 100 ? 0 : (1 - percent/100)) : price;
+				if (discPriceInput) discPriceInput.value = fmt(discounted);
+				if (discSpan) discSpan.textContent = percent.toFixed(1) + '%';
+				if (priceSpan) priceSpan.textContent = '$ ' + fmt(discounted);
+				// Toggle editable vs display depending on exclude flag
+				if (isExcluded) {
+					if (discInput) discInput.style.display = 'inline-block';
+					if (discPriceInput) discPriceInput.style.display = 'inline-block';
+					if (discSpan) discSpan.style.display = 'none';
+					if (priceSpan) priceSpan.style.display = 'none';
+				} else {
+					if (discInput) discInput.style.display = 'none';
+					if (discPriceInput) discPriceInput.style.display = 'none';
+					if (discSpan) discSpan.style.display = 'inline';
+					if (priceSpan) priceSpan.style.display = 'inline';
+				}
+			}
 
 			function renderRows(rows){
 				if (!body) return;
@@ -454,13 +671,20 @@ class SettingsPage {
 						'</td>' +
 						'<td style=\"text-align:center;\"><input type=\"checkbox\" class=\"hp-fb-exclude-gd\"'+(r.exclude_global_discount ? ' checked' : '')+' /></td>' +
 						'<td style=\"text-align:right;\">$ '+ fmt(price) +'</td>' +
-						'<td style=\"text-align:center;\"><input type=\"number\" step=\"0.1\" min=\"0\" max=\"100\" class=\"hp-fb-item-disc\" value=\"'+ String(disc) +'\" style=\"width:80px;\" /></td>' +
-						'<td style=\"text-align:right;\" class=\"hp-fb-discounted-cell\">$ '+ fmt(discounted) +'</td>' +
+						'<td style=\"text-align:center;\">' +
+							'<span class=\"hp-fb-disc-display\"></span>' +
+							'<input type=\"number\" step=\"0.1\" min=\"0\" max=\"100\" class=\"hp-fb-item-disc\" value=\"'+ String(disc) +'\" style=\"width:80px;display:none;\" />' +
+						'</td>' +
+						'<td style=\"text-align:right;\" class=\"hp-fb-discounted-cell\">' +
+							'<span class=\"hp-fb-disc-price-display\"></span>' +
+							'<input type=\"number\" step=\"0.01\" min=\"0\" class=\"hp-fb-discounted-input\" value=\"'+ fmt(discounted) +'\" style=\"width:90px;text-align:right;display:none;\" />' +
+						'</td>' +
 						'<td><button type=\"button\" class=\"button-link hp-fb-remove-row\">Remove</button>' +
 							'<input type=\"hidden\" class=\"hp-fb-product-id\" value=\"'+ String(r.product_id) +'\" />' +
 							'<input type=\"hidden\" class=\"hp-fb-sku\" value=\"'+ String(r.sku || '') +'\" />' +
 						'</td>';
 					body.appendChild(tr);
+					syncRowUI(r, tr);
 				});
 			}
 
@@ -490,14 +714,20 @@ class SettingsPage {
 						currentRows[idx].role = t.value;
 					} else if (t.classList.contains('hp-fb-exclude-gd')) {
 						currentRows[idx].exclude_global_discount = t.checked ? 1 : 0;
+						syncRowUI(currentRows[idx], tr);
 					} else if (t.classList.contains('hp-fb-item-disc')) {
 						const v = parseFloat(t.value || '0') || 0;
 						currentRows[idx].item_discount_percent = v;
-						// Recompute discounted cell
+						syncRowUI(currentRows[idx], tr);
+					} else if (t.classList.contains('hp-fb-discounted-input')) {
 						const price = parseFloat(currentRows[idx].price || 0) || 0;
-						const discounted = price > 0 && v > 0 ? price * (1 - v/100) : price;
-						const cell = tr.querySelector('.hp-fb-discounted-cell');
-						if (cell) cell.textContent = '$ ' + fmt(discounted);
+						const discounted = parseFloat(t.value || '0') || 0;
+						let percent = 0;
+						if (price > 0) {
+							percent = Math.max(0, Math.min(100, ((price - discounted) / price) * 100));
+						}
+						currentRows[idx].item_discount_percent = percent;
+						syncRowUI(currentRows[idx], tr);
 					}
 				});
 			}
@@ -508,10 +738,29 @@ class SettingsPage {
 				statusEl.style.color = isError ? '#c00' : '#008000';
 			}
 
+			// When global discount changes, immediately refresh all row displays
+			const globalDiscInput = document.getElementById('hp-fb-global-discount');
+			if (globalDiscInput) {
+				globalDiscInput.addEventListener('input', function(){
+					const trs = body ? Array.prototype.slice.call(body.querySelectorAll('tr')) : [];
+					trs.forEach(function(tr){
+						const idx = parseInt(tr.getAttribute('data-index') || '-1', 10);
+						if (idx >= 0 && currentRows[idx]) {
+							syncRowUI(currentRows[idx], tr);
+						}
+					});
+				});
+			}
+
 			const saveBtn = document.getElementById('hp-fb-funnel-save');
 			if (saveBtn) {
 				saveBtn.addEventListener('click', function(){
 					const globalDisc = parseFloat(document.getElementById('hp-fb-global-discount').value || '0') || 0;
+					const payBg = (document.getElementById('hp-fb-pay-bg') || {}).value || '';
+					const payCard = (document.getElementById('hp-fb-pay-card') || {}).value || '';
+					const payAccent = (document.getElementById('hp-fb-pay-accent') || {}).value || '';
+					const faviconId = (faviconIdInput && faviconIdInput.value) ? faviconIdInput.value : '';
+					const socialText = (document.getElementById('hp-fb-social-text') || {}).value || '';
 					// Refresh rows from DOM in case indexes shifted
 					const trs = body ? Array.prototype.slice.call(body.querySelectorAll('tr')) : [];
 					currentRows = trs.map(function(tr){
@@ -532,13 +781,21 @@ class SettingsPage {
 					});
 					showStatus('Saving...', false);
 					const payload = {
-						action: 'hp_fb_save_funnel_config',
 						funnel_id: funnelId,
 						nonce: nonce,
 						global_discount_percent: globalDisc,
 						products: currentRows,
+						payment_style: {
+							background_color: payBg,
+							card_color: payCard,
+							accent_color: payAccent,
+						},
+						branding: {
+							favicon_id: faviconId ? parseInt(faviconId, 10) || 0 : 0,
+							social_text: socialText,
+						},
 					};
-					fetch(ajaxurl, {
+					fetch(ajaxurl + '?action=hp_fb_save_funnel_config', {
 						method: 'POST',
 						headers: { 'Content-Type': 'application/json' },
 						body: JSON.stringify(payload),
@@ -559,10 +816,11 @@ class SettingsPage {
 
 			// Product search
 			const searchInput = document.getElementById('hp-fb-product-search');
-			const searchBtn = document.getElementById('hp-fb-product-search-btn');
 			const resultsBox = document.getElementById('hp-fb-product-search-results');
+			let currentSearchResults = [];
 			function renderSearchResults(items){
 				if (!resultsBox) return;
+				currentSearchResults = Array.isArray(items) ? items.slice() : [];
 				if (!items || !items.length) { resultsBox.innerHTML = '<p class=\"description\">No products found.</p>'; return; }
 				const ul = document.createElement('ul');
 				ul.style.listStyle = 'disc';
@@ -575,35 +833,11 @@ class SettingsPage {
 				});
 				resultsBox.innerHTML = '';
 				resultsBox.appendChild(ul);
-				resultsBox.addEventListener('click', function(e){
-					const t = e.target;
-					if (t && t.classList.contains('hp-fb-add-product')) {
-						const pid = parseInt(t.getAttribute('data-product_id') || '0', 10);
-						const prod = items.find(function(x){ return parseInt(x.id,10) === pid; });
-						if (!prod) return;
-						// Avoid duplicates
-						if (currentRows.some(function(r){ return parseInt(r.product_id,10) === pid; })) {
-							showStatus('Product already added.', true);
-							return;
-						}
-						currentRows.push({
-							product_id: pid,
-							name: prod.name,
-							sku: prod.sku || '',
-							image: prod.image || '',
-							price: prod.price || 0,
-							role: 'base',
-							exclude_global_discount: 0,
-							item_discount_percent: 0,
-						});
-						renderRows(currentRows);
-						showStatus('Product added. Don\'t forget to Save.', false);
-					}
-				}, { once: true });
 			}
+			let searchTimer = null;
 			function performSearch(){
 				const term = searchInput ? (searchInput.value || '').trim() : '';
-				if (!term) { renderSearchResults([]); return; }
+				if (!term || term.length < 3) { renderSearchResults([]); return; }
 				if (resultsBox) { resultsBox.innerHTML = '<p class=\"description\">Searching&hellip;</p>'; }
 				const payload = {
 					action: 'hp_fb_search_products',
@@ -623,11 +857,46 @@ class SettingsPage {
 						renderSearchResults([]);
 					});
 			}
-			if (searchBtn) searchBtn.addEventListener('click', performSearch);
+			if (resultsBox) {
+				resultsBox.addEventListener('click', function(e){
+					const t = e.target;
+					if (t && t.classList.contains('hp-fb-add-product')) {
+						const pid = parseInt(t.getAttribute('data-product_id') || '0', 10);
+						const prod = currentSearchResults.find(function(x){ return parseInt(x.id,10) === pid; });
+						if (!prod) return;
+						if (currentRows.some(function(r){ return parseInt(r.product_id,10) === pid; })) {
+							showStatus('Product already added.', true);
+							return;
+						}
+						currentRows.push({
+							product_id: pid,
+							name: prod.name,
+							sku: prod.sku || '',
+							image: prod.image || '',
+							price: prod.price || 0,
+							role: 'base',
+							exclude_global_discount: 0,
+							item_discount_percent: 0,
+						});
+						renderRows(currentRows);
+						showStatus('Product added. Don\'t forget to Save.', false);
+					}
+				});
+			}
 			if (searchInput) {
-				searchInput.addEventListener('keydown', function(e){
-					if (e.key === 'Enter') {
-						e.preventDefault();
+				searchInput.addEventListener('keyup', function(e){
+					const term = (searchInput.value || '').trim();
+					if (term.length < 3) {
+						if (resultsBox) resultsBox.innerHTML = '<p class=\"description\">Type at least 3 characters to search.</p>';
+						if (searchTimer) { clearTimeout(searchTimer); searchTimer = null; }
+						return;
+					}
+					if (searchTimer) clearTimeout(searchTimer);
+					searchTimer = setTimeout(function(){ performSearch(); }, 250);
+				});
+				searchInput.addEventListener('focus', function(){
+					const term = (searchInput.value || '').trim();
+					if (term.length >= 3) {
 						performSearch();
 					}
 				});

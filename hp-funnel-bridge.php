@@ -2,7 +2,7 @@
 /**
  * Plugin Name:       HP Funnel Bridge
  * Description:       Multi‑funnel bridge exposing REST endpoints for checkout, shipping rates, totals, and one‑click upsells. Reuses EAO (Stripe keys, ShipStation, YITH points) without modifying it.
- * Version:           0.2.47
+ * Version:           0.2.65
  * Requires at least: 6.0
  * Requires PHP:      7.4
  * Author:            Holistic People
@@ -15,7 +15,7 @@ if (!defined('ABSPATH')) {
 	exit;
 }
 
-define('HP_FB_PLUGIN_VERSION', '0.2.47');
+define('HP_FB_PLUGIN_VERSION', '0.2.65');
 define('HP_FB_PLUGIN_FILE', __FILE__);
 define('HP_FB_PLUGIN_DIR', plugin_dir_path(__FILE__));
 define('HP_FB_PLUGIN_URL', plugin_dir_url(__FILE__));
@@ -229,22 +229,66 @@ add_action('template_redirect', function () {
 	$cs_js = esc_js($cs);
 	// Build a valid absolute return URL for Stripe (must be https)
 	$here = esc_url(home_url('/'));
+	// Optional per-funnel hosted payment styling
+	$fid = isset($_GET['fid']) ? sanitize_key((string) $_GET['fid']) : '';
+	$opts = get_option('hp_fb_settings', []);
+	$cfgs = isset($opts['funnel_configs']) && is_array($opts['funnel_configs']) ? $opts['funnel_configs'] : [];
+
+	// Fallback: if fid not present, attempt to infer funnel id from succ URL (e.g. /funnels/illumodine/)
+	if ($fid === '' && !empty($_GET['succ'])) {
+		$succ_for_fid = (string) $_GET['succ'];
+		if (strpos($succ_for_fid, '%') !== false) {
+			$succ_for_fid = rawurldecode($succ_for_fid);
+		}
+		$u = @parse_url($succ_for_fid);
+		if (is_array($u) && !empty($u['path'])) {
+			$parts = explode('/', trim((string) $u['path'], '/'));
+			$idx = array_search('funnels', $parts, true);
+			if ($idx !== false && isset($parts[$idx + 1]) && $parts[$idx + 1] !== '') {
+				$fid = sanitize_key((string) $parts[$idx + 1]);
+			}
+		}
+	}
+
+	$style_cfg = ($fid && isset($cfgs[$fid]['payment_style']) && is_array($cfgs[$fid]['payment_style'])) ? $cfgs[$fid]['payment_style'] : [];
+	$accent_color = isset($style_cfg['accent_color']) ? sanitize_hex_color($style_cfg['accent_color']) : '#eab308';
+	$bg_color = isset($style_cfg['background_color']) ? sanitize_hex_color($style_cfg['background_color']) : '#020617';
+	$card_color = isset($style_cfg['card_color']) ? sanitize_hex_color($style_cfg['card_color']) : '#0f172a';
+
 	// Determine badge purely from publishable key; do not rely on global env
 	$isTest = (strpos($pubVal, '_test_') !== false);
-	echo '<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>HP Funnel Payment</title><style>body{font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;margin:24px;}#checkout{max-width:520px;margin:0 auto;}button{padding:10px 14px;border:1px solid #ccc;border-radius:6px;background:#111;color:#fff;cursor:pointer;}#messages{margin-top:12px;color:#c00}#amount{margin:6px 0 14px;color:#111;font-weight:600}.badge{display:inline-block;padding:2px 6px;border-radius:4px;font-size:12px;margin-left:8px}.test{background:#eef7ff;color:#0a66c2}.hint{font-size:13px;color:#333;background:#fafafa;border:1px solid #eee;border-radius:6px;padding:8px 10px;margin:8px 0}.hint code{background:#f2f2f2;padding:1px 4px;border-radius:3px}.copy{margin-left:8px;padding:3px 6px;border:1px solid #333;background:#333;color:#fff;border-radius:4px;cursor:pointer;font-size:12px}</style><script src="https://js.stripe.com/v3/"></script></head><body><div id="checkout"><h2>Complete Payment' . ($isTest ? '<span class="badge test" id="testbadge">Stripe Test Mode</span>' : '') . '</h2><div id="amount"></div>';
+	// Avoid any caching on the hosted payment page so style changes apply immediately
+	if (!headers_sent()) {
+		header('Cache-Control: no-store, no-cache, must-revalidate, max-age=0');
+		header('Pragma: no-cache');
+		header('Expires: 0');
+	}
+	// Dark theme styling to better match modern funnels, with per-funnel overrides
+	echo '<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>HP Funnel Payment</title><style>
+	body{margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;background:' . esc_html($bg_color) . ';font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;color:#e5e7eb;}
+	#checkout{width:100%;max-width:520px;background:' . esc_html($card_color) . ';border-radius:18px;padding:24px 24px 20px 24px;box-shadow:0 24px 60px rgba(15,23,42,0.9);border:1px solid rgba(148,163,184,0.3);}
+	h2{margin:0 0 8px 0;font-size:22px;font-weight:700;letter-spacing:.01em;color:#f9fafb;display:flex;align-items:center;gap:8px;}
+	#amount{margin:4px 0 18px 0;font-size:14px;font-weight:500;color:#eab308;}
+	button#pay{width:100%;margin-top:16px;padding:12px 16px;border-radius:999px;border:none;background:linear-gradient(90deg,' . esc_html($accent_color) . ',' . esc_html($accent_color) . ');color:#0f172a;font-weight:700;font-size:15px;cursor:pointer;box-shadow:0 0 24px rgba(234,179,8,0.45);transition:opacity .18s,transform .18s,box-shadow .18s;}
+	button#pay:disabled{opacity:.5;cursor:default;box-shadow:none;}
+	button#pay:not(:disabled):hover{opacity:.95;transform:translateY(-1px);box-shadow:0 0 30px rgba(234,179,8,0.75);}
+	#messages{margin-top:10px;font-size:13px;color:#fecaca;min-height:18px;}
+	.badge{display:inline-flex;align-items:center;justify-content:center;padding:2px 8px;border-radius:999px;font-size:11px;font-weight:600;margin-left:6px;border:1px solid rgba(248,250,252,0.25);}
+	.test{background:rgba(248,113,113,0.12);color:#fecaca;border-color:rgba(248,113,113,0.8);}
+	.hint{font-size:12px;color:#e5e7eb;background:rgba(15,23,42,0.9);border:1px solid rgba(148,163,184,0.35);border-radius:10px;padding:8px 10px;margin:10px 0;}
+	.hint code{background:rgba(15,23,42,0.9);padding:1px 4px;border-radius:4px;color:#e5e7eb;border:1px solid rgba(148,163,184,0.5);}
+	.copy{margin-left:6px;padding:2px 8px;border-radius:999px;border:1px solid rgba(148,163,184,0.8);background:transparent;color:#e5e7eb;cursor:pointer;font-size:11px;}
+	#element{margin-top:6px;padding:12px 12px 10px 12px;border-radius:14px;background:rgba(15,23,42,0.9);border:1px solid rgba(30,64,175,0.65);}
+	</style><script src="https://js.stripe.com/v3/"></script></head><body><div id="checkout"><h2>Complete Payment' . ($isTest ? '<span class="badge test" id="testbadge">Stripe Test Mode</span>' : '') . '</h2><div id="amount"></div>';
 	if ($isTest) {
 		echo '<div class="hint">Use Stripe test values: <br/>Card <code id="tcard">4242 4242 4242 4242</code><button class="copy" data-copy="#tcard">Copy</button> &nbsp; Exp <code id="texp">12/34</code><button class="copy" data-copy="#texp">Copy</button> &nbsp; CVC <code id="tcvc">123</code><button class="copy" data-copy="#tcvc">Copy</button></div>';
 	}
 	// Server-side robust succ extraction and normalization
 	$succ_in = isset($_GET['succ']) ? (string) $_GET['succ'] : '';
+	// Handle double encoding if necessary, but also trust URL as is if valid
 	$succ_norm = $succ_in;
-	// Decode up to twice (handles encodeURIComponent + server re-encoding)
-	for ($i = 0; $i < 2; $i++) {
-		$dec = rawurldecode($succ_norm);
-		if ($dec === $succ_norm) {
-			break;
-		}
-		$succ_norm = $dec;
+	if (strpos($succ_norm, '%') !== false) {
+		$succ_norm = rawurldecode($succ_norm);
 	}
 	// Validate scheme
 	if ($succ_norm !== '') {
@@ -264,9 +308,11 @@ add_action('template_redirect', function () {
 	$cs_e = esc_attr($cs);
 	$here_e = esc_attr($here);
 	$succ_e = esc_attr($succ_norm);
+	$accent_e = esc_attr($accent_color);
+	$bg_e = esc_attr($bg_color);
 	echo '<div id="element"></div><div style="margin-top:12px;"><button id="pay" disabled>Pay</button></div><div id="messages"></div></div>';
 	// Pass config via data attributes and load external script to avoid inline parsing issues
-	echo '<div id="hp-fb-config" data-pub="' . $pub_e . '" data-cs="' . $cs_e . '" data-ret="' . $here_e . '" data-succ="' . $succ_e . '"></div>';
+	echo '<div id="hp-fb-config" data-pub="' . $pub_e . '" data-cs="' . $cs_e . '" data-ret="' . $here_e . '" data-succ="' . $succ_e . '" data-accent="' . $accent_e . '" data-bg="' . $bg_e . '"></div>';
 	echo '<script src="' . esc_url(HP_FB_PLUGIN_URL . 'assets/confirm.js?v=' . rawurlencode(HP_FB_PLUGIN_VERSION)) . '"></script></body></html>';
 	exit;
 });

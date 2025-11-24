@@ -5,6 +5,7 @@ use HP_FB\Services\OrderDraftStore;
 use HP_FB\Services\PointsService;
 use HP_FB\Stripe\Client as StripeClient;
 use HP_FB\Util\Resolver;
+use HP_FB\Util\FunnelConfig;
 use WP_REST_Request;
 use WP_REST_Response;
 use WP_Error;
@@ -96,8 +97,25 @@ class CheckoutController {
 				$item = new \WC_Order_Item_Product();
 				$item->set_product($product);
 				$item->set_quantity($qty);
-				$item->set_subtotal($product->get_price() * $qty);
-				$item->set_total($product->get_price() * $qty);
+
+				$price    = (float) $product->get_price();
+				$subtotal = $price * $qty;
+				$total    = $subtotal;
+
+				$exclude_gd = !empty($it['exclude_global_discount']);
+				$item_pct   = isset($it['item_discount_percent']) ? (float) $it['item_discount_percent'] : null;
+
+				if ($item_pct !== null && $item_pct >= 0) {
+					$discounted = $price * (1 - ($item_pct / 100.0));
+					$total = max(0.0, $discounted * $qty);
+					$item->add_meta_data('_eao_item_discount_percent', $item_pct, true);
+				}
+				if ($exclude_gd) {
+					$item->add_meta_data('_eao_exclude_global_discount', '1', true);
+				}
+
+				$item->set_subtotal($subtotal);
+				$item->set_total($total);
 				$order->add_item($item);
 			}
 			// Address
@@ -119,12 +137,56 @@ class CheckoutController {
 			}
 			// First calculation to know products net (points cannot cover shipping/tax)
 			$order->calculate_totals(false);
-			$products_gross = (float)$order->get_subtotal();
+			
+			// Load funnel config for discounts
+			$fConfig = FunnelConfig::get($funnel_id);
+			$global_percent = (float)$fConfig['global_discount_percent'];
+
+			// Apply per-item overrides (exclude global, specific item discount) from config,
+			// but only for items that don't already have explicit overrides from the payload.
+			foreach ($order->get_items() as $item) {
+				if (!$item instanceof \WC_Order_Item_Product) { continue; }
+
+				$has_explicit_exclude = (bool) $item->get_meta('_eao_exclude_global_discount', true);
+				$has_explicit_pct     = $item->get_meta('_eao_item_discount_percent', true) !== '';
+				if ($has_explicit_exclude || $has_explicit_pct) {
+					continue;
+				}
+
+				$pid = $item->get_product_id();
+				$product = $item->get_product();
+				if (!$product) { continue; }
+				$sku = (string)$product->get_sku();
+				
+				$pConf = FunnelConfig::getProductConfig($fConfig, $pid, $sku);
+				if ($pConf && !empty($pConf['exclude_global_discount'])) {
+					// Excluded from global discount. Check for specific item discount.
+					$item_discount = isset($pConf['item_discount_percent']) ? (float)$pConf['item_discount_percent'] : 0.0;
+					if ($item_discount > 0) {
+						$qty = $item->get_quantity();
+						$regular = (float) $product->get_price(); // MSRP
+						$discounted = $regular * (1 - ($item_discount / 100.0));
+						// Set subtotal to MSRP (standard WC practice) and total to discounted
+						$item->set_subtotal($regular * $qty);
+						$item->set_total($discounted * $qty);
+						$item->add_meta_data('_eao_item_discount_percent', $item_discount, true);
+					}
+					// Mark as excluded so global discount logic ignores it
+					$item->add_meta_data('_eao_exclude_global_discount', '1', true);
+				}
+			}
+			
+			$products_gross = 0.0;
+			// Sum up subtotal of items NOT excluded from global discount
+			foreach ($order->get_items() as $item) {
+				if (!$item instanceof \WC_Order_Item_Product) { continue; }
+				if ($item->get_meta('_eao_exclude_global_discount')) { continue; }
+				$products_gross += (float)$item->get_subtotal();
+			}
+
 			$discount_total = (float)$order->get_discount_total();
-			// Optional per-funnel global discount (10%) – currently enabled only for fasting kit.
-			$global_percent = ($funnel_id === 'fastingkit') ? 10.0 : 0.0;
 			$global_discount = 0.0;
-			if ($global_percent > 0.0) {
+			if ($global_percent > 0.0 && $products_gross > 0.0) {
 				$global_discount = round($products_gross * ($global_percent / 100.0), 2);
 				if ($global_discount > 0.0) {
 					$fee = new \WC_Order_Item_Fee();
@@ -134,7 +196,9 @@ class CheckoutController {
 					$order->add_item($fee);
 				}
 			}
-			$products_net = max(0.0, $products_gross - $discount_total - $global_discount);
+			
+			$all_products_subtotal = (float)$order->get_subtotal();
+			$products_net = max(0.0, $all_products_subtotal - $discount_total - $global_discount);
 
       // Points as negative fee now; webhook will reconcile via YITH. Cap to products_net.
       $ps = new PointsService();

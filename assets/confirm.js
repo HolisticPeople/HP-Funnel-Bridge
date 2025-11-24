@@ -46,11 +46,27 @@
     var cs = cfg.getAttribute("data-cs") || "";
     var ret = cfg.getAttribute("data-ret") || "";
     var succ = cfg.getAttribute("data-succ") || "";
+    var accent = cfg.getAttribute("data-accent") || "#eab308";
+    var bg = cfg.getAttribute("data-bg") || "#020617";
     bindCopy();
     var msg = document.getElementById("messages");
     try {
       var stripe = window.Stripe(pub);
-      var elements = stripe.elements({ clientSecret: cs });
+      // Dark appearance to better blend with funnel themes, per-funnel accent/bg
+      var elements = stripe.elements({
+        clientSecret: cs,
+        appearance: {
+          theme: "night",
+          variables: {
+            colorPrimary: accent,
+            colorBackground: bg,
+            colorText: "#e5e7eb",
+            colorTextSecondary: "#9ca3af",
+            colorDanger: "#f97373",
+            borderRadius: "12px",
+          },
+        },
+      });
       var paymentElement = elements.create("payment");
       paymentElement.mount("#element");
       var btn = document.getElementById("pay");
@@ -74,27 +90,32 @@
       async function tryRedirect() {
         if (!succ || !isSafeUrl(succ) || !piId) return;
         if (msg) msg.textContent = "Payment processed. Finishing up...";
-        for (var i = 0; i < 30; i++) {
+        
+        // Use absolute URL for polling to avoid relative path confusion on hosted pages
+        var pollingUrl = "/wp-json/hp-funnel/v1/orders/resolve?pi_id=" + encodeURIComponent(piId);
+        if (window.location.origin) {
+            // Ensure origin doesn't double slash if pollingUrl starts with /
+            var origin = window.location.origin.replace(/\/$/, "");
+            pollingUrl = origin + pollingUrl;
+        }
+
+        // Poll up to ~15 seconds for the Woo order to exist
+        for (var i = 0; i < 15; i++) {
           try {
             var r = await fetch(
-              "/wp-json/hp-funnel/v1/orders/resolve?pi_id=" +
-                encodeURIComponent(piId),
+              pollingUrl,
               { headers: { Accept: "application/json" } }
             );
             if (r.ok) {
               var t = await r.json();
               if (t && t.order_id) {
                 var uu = new URL(succ);
-                // redirect to funnel base with go=upsell so SPA can rewrite without server rewrites
-                var parts = uu.pathname.split("/");
-                if (parts[parts.length - 1] === "") parts.pop();
-                if (parts[parts.length - 1] === "upsell") parts.pop();
-                uu.pathname = parts.join("/") + "/";
-                uu.search = "";
-                uu.hash = "";
-                uu.searchParams.set("go", "upsell");
+                // Pass order_id and both payment_intent + pi_id for compatibility
                 uu.searchParams.set("order_id", String(t.order_id));
-                if (piId) uu.searchParams.set("pi_id", String(piId));
+                if (piId) {
+                  uu.searchParams.set("payment_intent", String(piId));
+                  uu.searchParams.set("pi_id", String(piId));
+                }
                 window.location.replace(uu.toString());
                 return;
               }
@@ -104,25 +125,17 @@
             setTimeout(res, 1000);
           });
         }
-        // fallback: still go to funnel base with go=upsell
+        // fallback: just go to succ with payment_intent + pi_id
         try {
-          var baseUrl = new URL(succ);
-          var p = baseUrl.pathname.split("/");
-          if (p[p.length - 1] === "") p.pop();
-          if (p[p.length - 1] === "upsell") p.pop();
-          baseUrl.pathname = p.join("/") + "/";
-          baseUrl.search = "";
-          baseUrl.hash = "";
-          baseUrl.searchParams.set("go", "upsell");
-          baseUrl.searchParams.set("pi_id", piId);
-          window.location.replace(baseUrl.toString());
-        } catch (_) {
-          try {
-            var u2 = new URL(ret);
-            u2.searchParams.set("go", "upsell");
+          var u2 = new URL(succ);
+          if (piId) {
+            u2.searchParams.set("payment_intent", piId);
             u2.searchParams.set("pi_id", piId);
-            window.location.replace(u2.toString());
-          } catch (__) {}
+          }
+          window.location.replace(u2.toString());
+        } catch (_) {
+          // if all else fails, reload
+          // window.location.reload();
         }
       }
 
