@@ -340,3 +340,34 @@ add_action('init', function () {
 		exit;
 	}
 });
+
+// SPA Routing Fallback for Illumodine Funnel
+add_action('template_redirect', function () {
+	$req = $_SERVER['REQUEST_URI'] ?? '';
+	$funnel_base = '/funnels/illumodine/';
+
+	// Only run if we are in the funnel path
+	if (strpos($req, $funnel_base) !== 0) {
+		return;
+	}
+
+	// If this is a request for a file with an extension (e.g. .js, .css, .png), let it 404 naturally if missing
+	// This prevents serving index.html for missing assets
+	if (preg_match('/\.[a-zA-Z0-9]{2,4}$/', parse_url($req, PHP_URL_PATH))) {
+		return;
+	}
+
+	// Path to the index.html file
+	// Assuming the funnel is deployed to {WP_ROOT}/funnels/illumodine/
+	$index_file = ABSPATH . 'funnels/illumodine/index.html';
+
+	if (file_exists($index_file)) {
+		status_header(200);
+		// Prevent caching of the entry point to ensure updates are seen
+		header('Cache-Control: no-cache, no-store, must-revalidate');
+		header('Content-Type: text/html; charset=utf-8');
+		readfile($index_file);
+		exit;
+	}
+});
+
