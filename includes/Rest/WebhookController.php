@@ -70,13 +70,36 @@ class WebhookController {
 
 	private function onPaymentIntentSucceeded(array $pi) {
 		$draft_id = isset($pi['metadata']['order_draft_id']) ? (string)$pi['metadata']['order_draft_id'] : '';
+		
+		// If no draft ID, this payment wasn't made through our funnel - acknowledge and ignore
+		// IMPORTANT: Return 200 so Stripe doesn't think webhook is broken and disable it
 		if ($draft_id === '') {
-			return new WP_REST_Response(['ok' => false, 'reason' => 'no_draft'], 400);
+			return new WP_REST_Response([
+				'ok' => true, 
+				'ignored' => true, 
+				'reason' => 'not_a_funnel_payment'
+			], 200);
 		}
+		
 		$store = new OrderDraftStore();
 		$draft = $store->get($draft_id);
+		
+		// Draft expired (TTL is 2 hours) - log but return 200 to avoid webhook disable
 		if (!$draft) {
-			return new WP_REST_Response(['ok' => false, 'reason' => 'draft_not_found'], 404);
+			// Log this for debugging - this indicates a real funnel payment that we couldn't process
+			if (function_exists('wc_get_logger')) {
+				$logger = wc_get_logger();
+				$pi_id = isset($pi['id']) ? (string)$pi['id'] : 'unknown';
+				$logger->warning(
+					"Funnel webhook: draft expired for PI {$pi_id}, draft_id: {$draft_id}",
+					['source' => 'hp-funnel-bridge']
+				);
+			}
+			return new WP_REST_Response([
+				'ok' => false, 
+				'reason' => 'draft_expired',
+				'draft_id' => $draft_id
+			], 200); // Return 200 to acknowledge receipt, even though we couldn't process
 		}
 		$order = wc_create_order();
 		// Link to existing user by email, if exists
