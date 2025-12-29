@@ -1,0 +1,38 @@
+# HP-Funnel-Bridge - NOT for Funnel Creation
+
+## WARNING: This plugin is NOT for creating new funnels
+
+HP-Funnel-Bridge connects the external Lovable/React funnel (illumodine-boost-funnel) to WordPress. 
+
+**DO NOT use this plugin when asked to create new funnels.**
+
+## For Funnel Creation, Use HP-React-Widgets
+
+The correct system for creating new funnels is the **HP-React-Widgets AI Funnel API**:
+
+### API Base
+```
+/wp-json/hp-rw/v1/ai/
+```
+
+### Key Endpoints
+- `GET /ai/system/explain` - System documentation
+- `GET /ai/schema` - Schema with AI hints
+- `POST /ai/funnels` - Create funnel
+- `POST /ai/protocols/build-kit` - Build kit from protocol
+
+### Documentation
+See `HP-React-Widgets/docs/AI_FUNNEL_CREATION.md` for complete guide.
+
+### MCP Access
+Use `woocommerce_mcp_staging` or `woocommerce_mcp_production` MCP servers.
+
+## What HP-Funnel-Bridge IS For
+
+This plugin provides:
+1. REST API bridge between Lovable React app and WordPress/WooCommerce
+2. Configuration for the external satellite funnel
+3. Checkout processing for the Lovable funnel
+
+It does NOT create new funnels - it only bridges an existing external funnel.
+
