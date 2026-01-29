@@ -50,6 +50,14 @@
     var bg = cfg.getAttribute("data-bg") || "#020617";
     bindCopy();
     var msg = document.getElementById("messages");
+
+    // Check if returning from a redirect (PayPal, 3DS, etc.)
+    // Stripe adds payment_intent and payment_intent_client_secret to the URL
+    var urlParams = new URLSearchParams(window.location.search);
+    var redirectPiId = urlParams.get("payment_intent");
+    var redirectPiSecret = urlParams.get("payment_intent_client_secret");
+    var isRedirectReturn = redirectPiId && redirectPiSecret;
+
     try {
       var stripe = window.Stripe(pub);
       // Dark appearance to better blend with funnel themes, per-funnel accent/bg
@@ -75,6 +83,52 @@
         if (msg) msg.textContent = "";
       });
       var piId = "";
+
+      // If returning from redirect, handle completion immediately
+      if (isRedirectReturn) {
+        piId = redirectPiId;
+        if (msg) msg.textContent = "Verifying payment...";
+        btn.disabled = true;
+        stripe
+          .retrievePaymentIntent(redirectPiSecret)
+          .then(async function (pir) {
+            if (pir && pir.paymentIntent) {
+              var status = pir.paymentIntent.status;
+              if (status === "succeeded" || status === "processing") {
+                // Payment successful, redirect to success URL
+                await tryRedirect();
+              } else if (status === "requires_payment_method") {
+                // Payment failed, allow user to try again
+                if (msg) msg.textContent = "Payment was not completed. Please try again.";
+                btn.disabled = false;
+              } else if (status === "requires_action" || status === "requires_confirmation") {
+                // Needs further action
+                if (msg) msg.textContent = "Additional verification required...";
+                var res = await stripe.confirmPayment({
+                  elements: elements,
+                  clientSecret: cs,
+                  confirmParams: { return_url: ret },
+                  redirect: "if_required",
+                });
+                if (res.error) {
+                  if (msg) msg.textContent = res.error.message || "Payment verification failed";
+                  btn.disabled = false;
+                } else {
+                  await tryRedirect();
+                }
+              } else {
+                if (msg) msg.textContent = "Payment status: " + status + ". Please contact support.";
+                btn.disabled = false;
+              }
+            }
+          })
+          .catch(function (err) {
+            if (msg) msg.textContent = "Failed to verify payment status";
+            btn.disabled = false;
+          });
+        // Don't continue to normal flow
+      }
+
       stripe
         .retrievePaymentIntent(cs)
         .then(function (pir) {

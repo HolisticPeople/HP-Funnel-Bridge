@@ -2,7 +2,7 @@
 /**
  * Plugin Name:       HP Funnel Bridge
  * Description:       Multi‑funnel bridge exposing REST endpoints for checkout, shipping rates, totals, and one‑click upsells. Reuses EAO (Stripe keys, ShipStation, YITH points) without modifying it.
- * Version:           0.2.68
+ * Version:           0.2.69
  * Requires at least: 6.0
  * Requires PHP:      7.4
  * Author:            Holistic People
@@ -15,7 +15,7 @@ if (!defined('ABSPATH')) {
 	exit;
 }
 
-define('HP_FB_PLUGIN_VERSION', '0.2.68');
+define('HP_FB_PLUGIN_VERSION', '0.2.69');
 define('HP_FB_PLUGIN_FILE', __FILE__);
 define('HP_FB_PLUGIN_DIR', plugin_dir_path(__FILE__));
 define('HP_FB_PLUGIN_URL', plugin_dir_url(__FILE__));
@@ -263,6 +263,19 @@ add_action('template_redirect', function () {
 		header('Pragma: no-cache');
 		header('Expires: 0');
 	}
+	// Build the return URL for redirect-based payments (PayPal, 3DS, etc.)
+	// Must point back to this hosted payment page with params preserved
+	$return_url_params = [
+		'hp_fb_confirm' => '1',
+		'cs' => $cs,
+		'succ' => $succ_norm,
+		'pk' => $pubVal,
+	];
+	if ($fid !== '') {
+		$return_url_params['fid'] = $fid;
+	}
+	$return_url = home_url('/hp-funnel-confirm?' . http_build_query($return_url_params));
+
 	// Dark theme styling to better match modern funnels, with per-funnel overrides
 	echo '<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>HP Funnel Payment</title><style>
 	body{margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;background:' . esc_html($bg_color) . ';font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;color:#e5e7eb;}
@@ -306,13 +319,13 @@ add_action('template_redirect', function () {
 	}
 	$pub_e = esc_attr($pubVal);
 	$cs_e = esc_attr($cs);
-	$here_e = esc_attr($here);
+	$return_url_e = esc_attr($return_url);
 	$succ_e = esc_attr($succ_norm);
 	$accent_e = esc_attr($accent_color);
 	$bg_e = esc_attr($bg_color);
 	echo '<div id="element"></div><div style="margin-top:12px;"><button id="pay" disabled>Pay</button></div><div id="messages"></div></div>';
 	// Pass config via data attributes and load external script to avoid inline parsing issues
-	echo '<div id="hp-fb-config" data-pub="' . $pub_e . '" data-cs="' . $cs_e . '" data-ret="' . $here_e . '" data-succ="' . $succ_e . '" data-accent="' . $accent_e . '" data-bg="' . $bg_e . '"></div>';
+	echo '<div id="hp-fb-config" data-pub="' . $pub_e . '" data-cs="' . $cs_e . '" data-ret="' . $return_url_e . '" data-succ="' . $succ_e . '" data-accent="' . $accent_e . '" data-bg="' . $bg_e . '"></div>';
 	echo '<script src="' . esc_url(HP_FB_PLUGIN_URL . 'assets/confirm.js?v=' . rawurlencode(HP_FB_PLUGIN_VERSION)) . '"></script></body></html>';
 	exit;
 });

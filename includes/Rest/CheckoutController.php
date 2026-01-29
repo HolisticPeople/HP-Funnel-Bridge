@@ -265,8 +265,9 @@ class CheckoutController {
 			'amount' => $amount_cents,
 			'currency' => strtolower(get_woocommerce_currency('USD') ?: 'usd'),
 			'customer' => $cus,
-			// Explicitly limit to card to hide Link/Bank
-			'payment_method_types[]' => 'card',
+			// Enable automatic payment methods (configured in Stripe Dashboard)
+			// This enables: Card, Apple Pay, Google Pay, Link, PayPal, etc.
+			'automatic_payment_methods[enabled]' => 'true',
 			// Persist for one‑click off‑session bump
 			'payment_method_options[card][setup_future_usage]' => 'off_session',
 			// Helpful description in Stripe dashboard
